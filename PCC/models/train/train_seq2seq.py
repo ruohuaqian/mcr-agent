@@ -64,7 +64,6 @@ if __name__ == '__main__':
     parser.add_argument('--panoramic', help='use panoramic', action='store_true')
     parser.add_argument('--orientation', help='use orientation features', action='store_true')
     parser.add_argument('--panoramic_concat', help='use panoramic', action='store_true')
-    parser.add_argument('--use_templated_goals', help='use templated goals instead of human-annotated goal descriptions (only available for train set)', action='store_true')
 
 
     # debugging

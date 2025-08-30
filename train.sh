@@ -5,6 +5,10 @@ ALFRED_ROOT=/content/alfred
 MCR_ROOT=/content/mcr-agent
 DRIVE_ROOT=/content/drive/MyDrive
 
+# 设置环境变量
+export ALFRED_ROOT="$ALFRED_ROOT"
+export MCR_ROOT="$MCR_ROOT"
+
 # Use Google Drive for data storage if available
 if [ -d "$DRIVE_ROOT/json_feat_2.1.0" ]; then
     DATA_PATH="$DRIVE_ROOT/json_feat_2.1.0"
@@ -16,7 +20,7 @@ fi
 
 # Set output to Google Drive
 DOUT="${DOUT:-$DRIVE_ROOT/exp/MCR_Agent}"
-BATCH_SIZE=8  # 减少默认批处理大小以避免内存不足
+BATCH_SIZE=4  # 减少默认批处理大小以避免内存不足
 PANORAMIC_ARGS="--panoramic --panoramic_concat"
 
 # 初始化其他参数
@@ -138,10 +142,16 @@ done
 
 echo "Starting MCR-Agent training with output directory: $DOUT"
 echo "Common arguments: $COMMON_ARGS"
+echo "ALFRED_ROOT: $ALFRED_ROOT"
 
 ################################## Train master policy ##################################
 echo "=== Training Master Policy ==="
 cd ${MCR_ROOT}/MasterPolicy
+
+# 在运行Python之前设置环境变量
+export ALFRED_ROOT="$ALFRED_ROOT"
+export PYTHONPATH="/content/alfred:/content/mcr-agent:/content/mcr-agent/MasterPolicy:$PYTHONPATH"
+
 python models/train/train_seq2seq.py \
     --dout ${DOUT}/MasterPolicy \
     --lr ${LR:-1e-4} \
@@ -165,6 +175,10 @@ subgoals=("CleanObject" "HeatObject" "CoolObject" "SliceObject" "ToggleObject" "
 
 for subgoal in "${subgoals[@]}"; do
     echo "Training $subgoal..."
+    # 确保环境变量设置
+    export ALFRED_ROOT="$ALFRED_ROOT"
+    export PYTHONPATH="/content/alfred:/content/mcr-agent:/content/mcr-agent/Interactions:$PYTHONPATH"
+
     python models/train/train_seq2seq.py \
         --subgoal_analysis=${subgoal} \
         --dout ${DOUT}/Interactions/${subgoal} \
@@ -184,6 +198,10 @@ cd ${MCR_ROOT}
 ########################## Train policy composition controller ##########################
 echo "=== Training Policy Composition Controller ==="
 cd ${MCR_ROOT}/PCC
+# 确保环境变量设置
+export ALFRED_ROOT="$ALFRED_ROOT"
+export PYTHONPATH="/content/alfred:/content/mcr-agent:/content/mcr-agent/PCC:$PYTHONPATH"
+
 python models/train/train_seq2seq.py \
     --dout ${DOUT}/PCC \
     --lr ${LR:-1e-3} \
@@ -201,6 +219,10 @@ cd ${MCR_ROOT}
 ############################## Train Object Encoding Module #############################
 echo "=== Training Object Encoding Module ==="
 cd ${MCR_ROOT}/OEM
+# 确保环境变量设置
+export ALFRED_ROOT="$ALFRED_ROOT"
+export PYTHONPATH="/content/alfred:/content/mcr-agent:/content/mcr-agent/OEM:$PYTHONPATH"
+
 python models/train/train_seq2seq.py \
     --dout ${DOUT}/OEM \
     --lr ${LR:-1e-3} \
