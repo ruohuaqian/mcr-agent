@@ -32,6 +32,8 @@ if __name__ == '__main__':
     parser.add_argument('--dout', help='where to save model', default='exp/model:{model}')
     parser.add_argument('--resume', help='load a checkpoint')
     parser.add_argument('--subgoal_analysis', help='which subgoal to train', required=True)
+    parser.add_argument('--use_templated_goals', help='use templated goals instead of human-annotated goal descriptions (only available for train set)', action='store_true')
+
 
     # hyper parameters
     parser.add_argument('--batch', help='batch size', default=4, type=int)
