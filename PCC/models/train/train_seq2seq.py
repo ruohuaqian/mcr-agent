@@ -101,10 +101,7 @@ if __name__ == '__main__':
     with open('objnav_cls.txt', 'r') as f:
         obj_list = f.readlines()
     vocab['objnav'] = Vocab([w.strip().lower() for w in obj_list] + ['<<nav>>', '<<pad>>'])
- 
     vocab['action_low'].word2index(['Manipulate'], train=True)
- 
-
     # load model
     M = import_module('model.{}'.format(args.model))
     if args.resume:
