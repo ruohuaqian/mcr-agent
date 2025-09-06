@@ -179,7 +179,7 @@ class EvalTask(Eval):
         evaluation loop
         '''
         # start THOR
-        env = ThorEnv()
+        env = ThorEnv(use_virtual_display=True)
         count = 0
         while True:
             

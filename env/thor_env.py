@@ -8,7 +8,7 @@ from ai2thor.controller import Controller
 import gen.utils.image_util as image_util
 from gen.utils import game_util
 from gen.utils.game_util import get_objects_of_type, get_obj_of_type_closest_to_obj
-
+from pyvirtualdisplay import Display
 
 DEFAULT_RENDER_SETTINGS = {'renderImage': True,
                            'renderDepthImage': False,
@@ -20,25 +20,56 @@ class ThorEnv(Controller):
     '''
     an extension of ai2thor.controller.Controller for ALFRED tasks
     '''
-    def __init__(self, x_display=constants.X_DISPLAY,
-                 player_screen_height=constants.DETECTION_SCREEN_HEIGHT,
-                 player_screen_width=constants.DETECTION_SCREEN_WIDTH,
-                 quality='MediumCloseFitShadows',
-                 build_path=constants.BUILD_PATH):
+    def __init__(
+        self,
+        x_display=constants.X_DISPLAY,
+        player_screen_height=constants.DETECTION_SCREEN_HEIGHT,
+        player_screen_width=constants.DETECTION_SCREEN_WIDTH,
+        quality='MediumCloseFitShadows',
+        build_path=constants.BUILD_PATH,
+        use_virtual_display=True,
+        vdisplay_size=(1024, 768),
+        vdisplay_color_depth=24,
+    ):
+        self._display = None
 
-        super().__init__(quality=quality)
-        self.local_executable_path = build_path
-        self.start(x_display=x_display,
-                   player_screen_height=player_screen_height,
-                   player_screen_width=player_screen_width)
+        # 1) Ensure a 24-bit X display exists (or create one)
+        if use_virtual_display:
+            # If DISPLAY is unset or you want to force a clean virtual display, spin one up
+            self._display = Display(
+                visible=0,
+                size=vdisplay_size,
+                color_depth=vdisplay_color_depth
+            )
+            self._display.start()
+            # point ai2thor to this display
+            x_display = f":{self._display.display}"
+            os.environ["DISPLAY"] = x_display  # for libraries that read DISPLAY directly
+
+        # 2) Optional GL hints that help on some headless boxes (harmless otherwise)
+        os.environ.setdefault("MESA_GL_VERSION_OVERRIDE", "3.3")
+        os.environ.setdefault("SDL_VIDEODRIVER", "x11")
+
+        # 3) Initialize Controller
+        super().__init__(
+            quality=quality,
+            local_executable_path=build_path,
+            # you can also pass width/height here if you prefer
+        )
+
+        # 4) Start AI2-THOR tied to our (virtual) X display
+        self.start(
+            x_display=x_display,
+            player_screen_height=player_screen_height,
+            player_screen_width=player_screen_width,
+        )
+
         self.task = None
-
-        # internal states
         self.cleaned_objects = set()
         self.cooled_objects = set()
         self.heated_objects = set()
 
-        print("ThorEnv started.")
+        print(f"ThorEnv started on DISPLAY={os.environ.get('DISPLAY', x_display)}.")
 
     def reset(self, scene_name_or_num,
               grid_size=constants.AGENT_STEP_SIZE / constants.RECORD_SMOOTHING_FACTOR,

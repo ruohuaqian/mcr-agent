@@ -9,3 +9,12 @@ overrides:
     source: "mcr-agent"
     path: "models/nn/vnn_sub.py"
 
+  nn:
+    action: "override"
+    source: "mcr-agent"
+    path: "models/nn"
+
+  constants:
+    action: "override"
+    source: "mcr-agent"
+    path: "gen/constants.py"
