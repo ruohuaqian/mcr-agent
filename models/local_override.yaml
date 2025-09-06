@@ -1,0 +1,5 @@
+overrides:
+  models.model.seq2seq_im_mask_sub:
+    action: "override"
+    source: "mcr-agent"
+    path: "models/model/seq2seq_im_mask_sub.py"
