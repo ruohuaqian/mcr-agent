@@ -1,3 +1,6 @@
+import importlib
+from config import config_manager
+
 original_import_module = importlib.import_module
 
 def patched_import_module(name, package=None):
