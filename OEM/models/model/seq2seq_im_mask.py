@@ -13,10 +13,10 @@ from gen.utils.image_util import decompress_mask
 
 from PIL import Image
 
-from gen  import constants
+from OEM.models.model import constants
 classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp', 'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
 
-from nn.resnet import Resnet
+from OEM.models.nn.resnet import Resnet
 
 class SelfAttn(nn.Module):
     '''

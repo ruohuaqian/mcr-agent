@@ -99,7 +99,7 @@ if __name__ == '__main__':
     vocab['action_low'].word2index(['Manipulate'], train=True)
 
     # load model
-    M = import_module('model.{}'.format(args.model))
+    M = import_module(args.model)
     if args.resume:
         print("Loading: " + args.resume)
         model, optimizer = M.Module.load(args.resume, args)
