@@ -1,22 +1,14 @@
 import os
-import cv2
 import torch
 import numpy as np
-import models.nn.vnn as vnn
+import nn.vnn as vnn
 import collections
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
-from models.model.seq2seq import Module as Base
+from model.seq2seq import Module as Base
 from models.utils.metric import compute_f1, compute_exact
 from gen.utils.image_util import decompress_mask
-
-from PIL import Image
-
-from gen import constants
-classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp', 'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
-
-from models.nn.resnet import Resnet
 
 
 class Module(Base):
@@ -28,27 +20,21 @@ class Module(Base):
         super().__init__(args, vocab)
 
         # encoder and self-attention
-        self.enc_goal = nn.LSTM(args.demb, args.dhid, bidirectional=True, batch_first=True)
-        self.enc_att_goal = vnn.SelfAttn(args.dhid*2)
+        self.enc = nn.LSTM(args.demb, args.dhid, bidirectional=True, batch_first=True)
+        self.enc_att = vnn.SelfAttn(args.dhid*2)
 
         # subgoal monitoring
         self.subgoal_monitoring = (self.args.pm_aux_loss_wt > 0 or self.args.subgoal_aux_loss_wt > 0)
 
         # frame mask decoder
-        if not args.panoramic:
-            decoder = vnn.ConvFrameMaskDecoderProgressMonitor if self.subgoal_monitoring else vnn.ConvFrameMaskDecoder
-        else:
-            decoder = vnn.ConvFrameMaskDecoderProgressMonitorPanoramicConcat if args.panoramic_concat else vnn.ConvFrameMaskDecoderProgressMonitorPanoramicHier
-            
-        self.dec = decoder(vocab, args, self.emb_action_low, args.dframe, 2*args.dhid,
+        decoder = vnn.ConvFrameMaskDecoderProgressMonitor if self.subgoal_monitoring else vnn.ConvFrameMaskDecoder
+        self.dec = decoder(self.emb_action_low, args.dframe, 2*args.dhid,
                            pframe=args.pframe,
                            attn_dropout=args.attn_dropout,
                            hstate_dropout=args.hstate_dropout,
                            actor_dropout=args.actor_dropout,
                            input_dropout=args.input_dropout,
-                           teacher_forcing=args.dec_teacher_forcing,
-                           panoramic=args.panoramic,
-                           orientation=args.orientation)
+                           teacher_forcing=args.dec_teacher_forcing)
 
         # dropouts
         self.vis_dropout = nn.Dropout(args.vis_dropout)
@@ -63,11 +49,10 @@ class Module(Base):
         # bce reconstruction loss
         self.bce_with_logits = torch.nn.BCEWithLogitsLoss(reduction='none')
         self.mse_loss = torch.nn.MSELoss(reduction='none')
-        self.ce_loss = torch.nn.CrossEntropyLoss()
 
         # paths
         self.root_path = os.getcwd()
-        self.feat_pt = 'feat_conv_panoramic.pt'
+        self.feat_pt = 'feat_conv.pt'
 
         # params
         self.max_subgoals = 25
@@ -75,45 +60,35 @@ class Module(Base):
         # reset model
         self.reset()
 
-        self.panoramic = args.panoramic
-        self.orientation = args.orientation
-        self.man_action = self.vocab['action_low'].word2index('Manipulate', train=False)
-        
-    def featurize(self, batch, action_high_order, objects2find, load_mask=True, load_frames=True):
+    def featurize(self, batch, load_mask=True, load_frames=True):
         '''
         tensorize and pad batch input
         '''
         device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
         feat = collections.defaultdict(list)
 
-        for ex, swapColor in batch:
+        for ex in batch:
             ###########
             # auxillary
             ###########
 
-            # action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
-            feat['action_high_order'].append(action_high_order)
             if not self.test_mode:
-                low_to_high_idx = ex['num']['low_to_high_idx']
-                action_high = action_high_order[low_to_high_idx]
-                feat['action_high'].append(action_high)
-            
-                val_action_high = (action_high == self.vocab['action_high'].word2index('GotoLocation', train=False)).astype(np.int64)
-            
-                v=0
-                while v < (len(val_action_high)-1):
-                    if (val_action_high[v] - val_action_high[v+1]) == 1:
-                        val_action_high[v+1] = 1
-                        v+=1
-                    v+=1
-                val_action_high[-1]=1
-            
+                # subgoal completion supervision
+                if self.args.subgoal_aux_loss_wt > 0:
+                    feat['subgoals_completed'].append(np.array(ex['num']['low_to_high_idx']) / self.max_subgoals)
+
+                # progress monitor supervision
+                if self.args.pm_aux_loss_wt > 0:
+                    num_actions = len([a for sg in ex['num']['action_low'] for a in sg])
+                    subgoal_progress = [(i+1)/float(num_actions) for i in range(num_actions)]
+                    feat['subgoal_progress'].append(subgoal_progress)
+
             #########
             # inputs
             #########
 
             # serialize segments
-            self.serialize_lang_action(ex, action_high_order)
+            self.serialize_lang_action(ex)
 
             # goal and instr language
             lang_goal, lang_instr = ex['num']['lang_goal'], ex['num']['lang_instr']
@@ -123,83 +98,50 @@ class Module(Base):
             lang_instr = self.zero_input(lang_instr) if self.args.zero_instr else lang_instr
 
             # append goal + instr
-            feat['lang_goal'].append(lang_goal)
-            feat['lang_instr'].append(lang_instr)
+            lang_goal_instr = lang_goal + lang_instr
+            feat['lang_goal_instr'].append(lang_goal_instr)
+
+            # load Resnet features from disk
+            if load_frames and not self.test_mode:
+                root = self.get_task_root(ex)
+                im = torch.load(os.path.join(root, self.feat_pt))
+
+                num_low_actions = len(ex['plan']['low_actions']) + 1  # +1 for additional stop action
+                num_feat_frames = im.shape[0]
+
+                # Modeling Quickstart (without filler frames)
+                if num_low_actions == num_feat_frames:
+                    feat['frames'].append(im)
+
+                # Full Dataset (contains filler frames)
+                else:
+                    keep = [None] * num_low_actions
+                    for i, d in enumerate(ex['images']):
+                        # only add frames linked with low-level actions (i.e. skip filler frames like smooth rotations and dish washing)
+                        if keep[d['low_idx']] is None:
+                            keep[d['low_idx']] = im[i]
+                    keep[-1] = im[-1]  # stop frame
+                    feat['frames'].append(torch.stack(keep, dim=0))
 
             #########
             # outputs
             #########
 
             if not self.test_mode:
-                alow = []
-                alow_manip = []
-                obj_high_indices = []
-               
+                # low-level action
+                feat['action_low'].append([a['action'] for a in ex['num']['action_low']])
 
-                for ia, a in enumerate(ex['num']['action_low']):
-                    if val_action_high[ia]==1 and a['action'] in self.vocab['action_low'].word2index(['<<pad>>', '<<seg>>', '<<stop>>', 
-                                                                                                     'LookDown_15', 'LookUp_15',
-                                                                                                     'RotateLeft_90', 'RotateRight_90', 
-                                                                                                     'MoveAhead_25'], train=False):
-                        alow.append(a['action'])
-                    elif val_action_high[ia]==1:
-                        alow.append(self.vocab['action_low'].word2index('Manipulate', train=False))
-                    
-                    if not (a['action'] in self.vocab['action_low'].word2index(['<<pad>>', '<<seg>>', '<<stop>>', 
-                                                                                 'LookDown_15', 'LookUp_15',
-                                                                                 'RotateLeft_90', 'RotateRight_90', 
-                                                                                 'MoveAhead_25'], train=False)):
-                        alow_manip.append(a['action'])
-                        obj_high_indices.append(low_to_high_idx[ia])
+                # low-level action mask
+                if load_mask:
+                    feat['action_low_mask'].append([self.decompress_mask(a['mask']) for a in ex['num']['action_low'] if a['mask'] is not None])
 
-                    
+                # low-level valid interact
+                feat['action_low_valid_interact'].append([a['valid_interact'] for a in ex['num']['action_low']])
 
 
-                feat['action_low'].append(alow)
-                feat['action_low_manip'].append(alow_manip)
-                feat['obj_high_indices'].append(obj_high_indices)
-
-                if self.args.subgoal_aux_loss_wt > 0:
-                    feat['subgoals_completed'].append(np.array(ex['num']['low_to_high_idx'])[val_action_high.nonzero()[0].astype(int)] / self.max_subgoals)
-
-                # progress monitor supervision
-                if self.args.pm_aux_loss_wt > 0:
-                    num_actions = len(alow)
-                    subgoal_progress = [(i+1)/float(num_actions) for i in range(num_actions)]
-                    feat['subgoal_progress'].append(subgoal_progress)
-
-
-
-            new_obj_list = [self.vocab['objnav'].word2index(of.lower(), train=False) for of in objects2find]
-
-            feat['objnav'].append(new_obj_list)
-                # feat['action_low_mask_label'].append(indices)
-                
-
-
-            # low-level valid interact
-
-            # load Resnet features from disk
-            if load_frames and not self.test_mode:
-                root = self.get_task_root(ex)
-                if not swapColor:
-                    im = torch.load(os.path.join(root, self.feat_pt))
-                elif swapColor in [1, 2]:
-                    im = torch.load(os.path.join(root, 'feat_conv_colorSwap{}_panoramic.pt'.format(swapColor)))
-                elif swapColor in [3, 4, 5, 6]:
-                    im = torch.load(os.path.join(root, 'feat_conv_onlyAutoAug{}_panoramic.pt'.format(swapColor - 2)))
-
-
-                feat['frames'].append(im[2][val_action_high.nonzero()[0]])
-                feat['frames_left'].append(im[0][val_action_high.nonzero()[0]])
-                feat['frames_up'].append(im[1][val_action_high.nonzero()[0]])
-                feat['frames_down'].append(im[3][val_action_high.nonzero()[0]])
-                feat['frames_right'].append(im[4][val_action_high.nonzero()[0]])
-
-        assert(np.all(np.array(list(map(len, feat['lang_instr']))) == np.array(list(map(len, feat['objnav']))))) 
         # tensorization and padding
         for k, v in feat.items():
-            if k in {'lang_goal'}:
+            if k in {'lang_goal_instr'}:
                 # language embedding and padding
                 seqs = [torch.tensor(vv, device=device) for vv in v]
                 pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
@@ -207,74 +149,33 @@ class Module(Base):
                 embed_seq = self.emb_word(pad_seq)
                 packed_input = pack_padded_sequence(embed_seq, seq_lengths, batch_first=True, enforce_sorted=False)
                 feat[k] = packed_input
-            elif k in {'lang_instr'}:
-                # language embedding and padding
-                num_instr = np.array(list(map(len, v)))
-                seqs = [torch.tensor(vvv, device=device) for vv in v for vvv in vv]
-
-
-                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
-                
-                embed_seq = self.emb_word(pad_seq)
-                fin_seq = []
-                
-                in_idx = 0
-                for l in num_instr:
-                    fin_seq.append(embed_seq[in_idx:in_idx+l])
-                    in_idx += l
-                feat[k] = {'seq': fin_seq} 
-            
             elif k in {'action_low_mask'}:
                 # mask padding
                 seqs = [torch.tensor(vv, device=device, dtype=torch.float) for vv in v]
-                feat[k] = seqs
-            elif k in {'action_low_mask_label'}:
-                # label
-                seqs = torch.tensor([vvv for vv in v for vvv in vv], device=device, dtype=torch.long)
                 feat[k] = seqs
             elif k in {'subgoal_progress', 'subgoals_completed'}:
                 # auxillary padding
                 seqs = [torch.tensor(vv, device=device, dtype=torch.float) for vv in v]
                 pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
                 feat[k] = pad_seq
-            elif k in {'action_high', 'action_high_order'}:
-                seqs = [torch.tensor(vv, device=device, dtype= torch.long) for vv in v]
-                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.vocab['action_high'].word2index('<<pad>>'))
-                feat[k] = pad_seq
-            elif k in {'objnav'}:
-                seqs = [torch.tensor(vv, device=device, dtype= torch.long) for vv in v]
-                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.vocab['objnav'].word2index('<<pad>>'))
-                embed_seq = self.emb_objnav(pad_seq)
-                feat[k] = embed_seq
             else:
                 # default: tensorize and pad sequence
-                seqs = [torch.tensor(vv, device=device, dtype=torch.float if ('frames' in k or 'orientation' in k) else torch.long) for vv in v]
+                seqs = [torch.tensor(vv, device=device, dtype=torch.float if ('frames' in k) else torch.long) for vv in v]
                 pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
                 feat[k] = pad_seq
 
         return feat
 
 
-    def serialize_lang_action(self, feat, action_high_order):
+    def serialize_lang_action(self, feat):
         '''
         append segmented instr language and low-level actions into single sequences
         '''
-        assert(len(action_high_order) == len(feat['num']['lang_instr']))
-        # print(action_high_order)
-        action_high_order = (action_high_order == self.vocab['action_high'].word2index('GotoLocation', train=False)).nonzero()[0]
-        # print('#', action_high_order)
-        li = []
-        for ai in range(len(action_high_order)-1):
-            li.append([word for desc in feat['num']['lang_instr'][action_high_order[ai]:action_high_order[ai+1]] for word in desc])
-        
-        # print(len(feat['num']['lang_instr']), action_high_order)
-        li.append([word for desc in feat['num']['lang_instr'][action_high_order[-1]:] for word in desc])
-
-        feat['num']['lang_instr'] = li
-
-
-        if not self.test_mode:
-            feat['num']['action_low'] = [a for a_group in feat['num']['action_low'] for a in a_group]
+        is_serialized = not isinstance(feat['num']['lang_instr'][0], list)
+        if not is_serialized:
+            feat['num']['lang_instr'] = [word for desc in feat['num']['lang_instr'] for word in desc]
+            if not self.test_mode:
+                feat['num']['action_low'] = [a for a_group in feat['num']['action_low'] for a in a_group]
 
 
     def decompress_mask(self, compressed_mask):
@@ -287,16 +188,10 @@ class Module(Base):
 
 
     def forward(self, feat, max_decode=300):
-
+        cont_lang, enc_lang = self.encode_lang(feat)
+        state_0 = cont_lang, torch.zeros_like(cont_lang)
         frames = self.vis_dropout(feat['frames'])
-        if self.panoramic:
-            frames_left = self.vis_dropout(feat['frames_left'])
-            frames_up = self.vis_dropout(feat['frames_up'])
-            frames_down = self.vis_dropout(feat['frames_down'])
-            frames_right = self.vis_dropout(feat['frames_right'])
-            res = self.dec(feat['objnav'], feat['lang_instr']['seq'], frames, frames_left, frames_up, frames_down, frames_right, max_decode=max_decode, gold=feat['action_low'])#, state_0_instr=state_0_instr)
-        else:
-            res = self.dec(enc_lang_goal, enc_lang_instr, frames, max_decode=max_decode, gold=feat['action_low'], state_0_goal=state_0_goal, state_0_instr=state_0_instr)
+        res = self.dec(enc_lang, frames, max_decode=max_decode, gold=feat['action_low'], state_0=state_0)
         feat.update(res)
         return feat
 
@@ -305,83 +200,54 @@ class Module(Base):
         '''
         encode goal+instr language
         '''
-        emb_lang = feat['lang_goal']
-        
-        self.lang_dropout(emb_lang.data)
-        
-        enc_lang, _ = self.enc_goal(emb_lang)
-        enc_lang, _ = pad_packed_sequence(enc_lang, batch_first=True)
-        
-        self.lang_dropout(enc_lang)
-        
-        cont_lang = self.enc_att_goal(enc_lang)
+        emb_lang_goal_instr = feat['lang_goal_instr']
+        self.lang_dropout(emb_lang_goal_instr.data)
+        enc_lang_goal_instr, _ = self.enc(emb_lang_goal_instr)
+        enc_lang_goal_instr, _ = pad_packed_sequence(enc_lang_goal_instr, batch_first=True)
+        self.lang_dropout(enc_lang_goal_instr)
+        cont_lang_goal_instr = self.enc_att(enc_lang_goal_instr)
 
-        return cont_lang, enc_lang
+        return cont_lang_goal_instr, enc_lang_goal_instr
+
 
     def reset(self):
         '''
         reset internal states (used for real-time execution during eval)
         '''
         self.r_state = {
-            'state_t_goal': None,
-            'state_t_instr': None,
+            'state_t': None,
             'e_t': None,
-            'cont_lang_goal': None,
-            'enc_lang_goal': None,
-            'cont_lang_instr': None,
-            'enc_lang_instr': None,
-            'lang_index':0,
-            'enc_obj': None,
+            'cont_lang': None,
+            'enc_lang': None
         }
 
-
-    def step(self, feat, lang_index=0, prev_action=None):
+    def step(self, feat, prev_action=None):
         '''
         forward the model for a single time-step (used for real-time execution during eval)
         '''
 
-        # encode language features (instr)
-        if self.r_state['cont_lang_instr'] is None and self.r_state['enc_lang_instr'] is None:
-            self.r_state['cont_lang_instr'], self.r_state['enc_lang_instr'] = self.dec.encode_lang_instr(feat['lang_instr']['seq'][0][lang_index].unsqueeze(0))
-            self.r_state['enc_obj'] = self.dec.object_enc(feat['objnav'][0][lang_index].unsqueeze(0))
+        # encode language features
+        if self.r_state['cont_lang'] is None and self.r_state['enc_lang'] is None:
+            self.r_state['cont_lang'], self.r_state['enc_lang'] = self.encode_lang(feat)
 
-        # print(len(feat['lang_instr']['seq']), feat['lang_instr']['seq'][0].shape)
-
-        # initialize embedding and hidden states (instr)
-        if self.r_state['e_t'] is None and self.r_state['state_t_instr'] is None:
-            self.r_state['e_t'] = self.dec.go.repeat(self.r_state['enc_lang_instr'].size(0), 1)
-            self.r_state['state_t_instr'] = self.r_state['cont_lang_instr'], torch.zeros_like(self.r_state['cont_lang_instr'])
-
-        if lang_index != self.r_state['lang_index']:
-            self.r_state['cont_lang_instr'], self.r_state['enc_lang_instr'] = self.dec.encode_lang_instr(feat['lang_instr']['seq'][0][lang_index].unsqueeze(0))
-            self.r_state['enc_obj'] = self.dec.object_enc(feat['objnav'][0][lang_index].unsqueeze(0))
-            self.r_state['lang_index'] = lang_index
-
-
+        # initialize embedding and hidden states
+        if self.r_state['e_t'] is None and self.r_state['state_t'] is None:
+            self.r_state['e_t'] = self.dec.go.repeat(self.r_state['enc_lang'].size(0), 1)
+            self.r_state['state_t'] = self.r_state['cont_lang'], torch.zeros_like(self.r_state['cont_lang'])
 
         # previous action embedding
         e_t = self.embed_action(prev_action) if prev_action is not None else self.r_state['e_t']
 
         # decode and save embedding and hidden states
-        if self.panoramic:
-
-            out_action_low, state_t_instr, attn_score_t_instr, _, _ = self.dec.step(enc_obj=self.r_state['enc_obj'], 
-                                                                                enc_instr=self.r_state['enc_lang_instr'], 
-                                                                                frame=feat['frames'][:, 0],
-                                                                                frame_left=feat['frames_left'][:, 0],
-                                                                                frame_up=feat['frames_up'][:, 0],
-                                                                                frame_down=feat['frames_down'][:, 0],
-                                                                                frame_right=feat['frames_right'][:, 0],
-                                                                                e_t=e_t, 
-                                                                                state_tm1_instr=self.r_state['state_t_instr'])
+        out_action_low, out_action_low_mask, state_t, *_ = self.dec.step(self.r_state['enc_lang'], feat['frames'][:, 0], e_t=e_t, state_tm1=self.r_state['state_t'])
 
         # save states
-        self.r_state['state_t_instr'] = state_t_instr
+        self.r_state['state_t'] = state_t
         self.r_state['e_t'] = self.dec.emb(out_action_low.max(1)[1])
 
         # output formatting
         feat['out_action_low'] = out_action_low.unsqueeze(0)
-
+        feat['out_action_low_mask'] = out_action_low_mask.unsqueeze(0)
         return feat
 
 
@@ -390,8 +256,8 @@ class Module(Base):
         output processing
         '''
         pred = {}
-        for (ex, _), alow, alow_mask in zip(batch, feat['out_action_low'].max(2)[1].tolist(), feat['out_action_low_mask']):
-            
+        for ex, alow, alow_mask in zip(batch, feat['out_action_low'].max(2)[1].tolist(), feat['out_action_low_mask']):
+            # remove padding tokens
             if self.pad in alow:
                 pad_start_idx = alow.index(self.pad)
                 alow = alow[:pad_start_idx]
@@ -407,9 +273,14 @@ class Module(Base):
             # index to API actions
             words = self.vocab['action_low'].index2word(alow)
 
+            # sigmoid preds to binary mask
+            alow_mask = F.sigmoid(alow_mask)
+            p_mask = [(alow_mask[t] > 0.5).cpu().numpy() for t in range(alow_mask.shape[0])]
 
-            pred[self.get_task_and_ann_id(ex)] = {
+            task_id_ann = self.get_task_and_ann_id(ex)
+            pred[task_id_ann] = {
                 'action_low': ' '.join(words),
+                'action_low_mask': p_mask,
             }
 
         return pred
@@ -443,6 +314,13 @@ class Module(Base):
         alow_loss *= pad_valid.float()
         alow_loss = alow_loss.mean()
         losses['action_low'] = alow_loss * self.args.action_loss_wt
+
+        # mask loss
+        valid_idxs = valid.view(-1).nonzero().view(-1)
+        flat_p_alow_mask = p_alow_mask.view(p_alow_mask.shape[0]*p_alow_mask.shape[1], *p_alow_mask.shape[2:])[valid_idxs]
+        flat_alow_mask = torch.cat(feat['action_low_mask'], dim=0)
+        alow_mask_loss = self.weighted_mask_loss(flat_p_alow_mask, flat_alow_mask)
+        losses['action_low_mask'] = alow_mask_loss * self.args.mask_loss_wt
 
         # subgoal completion loss
         if self.args.subgoal_aux_loss_wt > 0:
@@ -491,14 +369,10 @@ class Module(Base):
         compute f1 and extract match scores for output
         '''
         m = collections.defaultdict(list)
-        for (task, _) in data:
-            # try:
+        for task in data:
             ex = self.load_task_json(task)
             i = self.get_task_and_ann_id(ex)
             label = ' '.join([a['discrete_action']['action'] for a in ex['plan']['low_actions']])
             m['action_low_f1'].append(compute_f1(label.lower(), preds[i]['action_low'].lower()))
             m['action_low_em'].append(compute_exact(label.lower(), preds[i]['action_low'].lower()))
-            # except:
-            #     print("KeyError in valid")
-            #     pass
         return {k: sum(v)/len(v) for k, v in m.items()}
