@@ -2,23 +2,23 @@ import os
 import cv2
 import torch
 import numpy as np
-import OEM.models.nn.vnn as vnn
+import models.nn.vnn as vnn
 import collections
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
-from OEM.models.model.seq2seq import Module as Base
+from models.model.seq2seq import Module as Base
 from models.utils.metric import compute_f1, compute_exact
 from gen.utils.image_util import decompress_mask
 
 from PIL import Image
 
-from OEM.models.model import constants
+from models.model import constants
 
 classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp',
                                      'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
 
-from OEM.models.nn.resnet import Resnet
+from models.nn.resnet import Resnet
 
 
 class SelfAttn(nn.Module):
