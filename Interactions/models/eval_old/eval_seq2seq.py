@@ -1,13 +1,7 @@
-import os
-import sys
-sys.path.append(os.path.join(os.environ['ALFRED_ROOT']))
-sys.path.append(os.path.join(os.environ['ALFRED_ROOT'], 'gen'))
-sys.path.append(os.path.join(os.environ['ALFRED_ROOT'], 'models'))
-
 import argparse
 import torch.multiprocessing as mp
 from eval_task import EvalTask
-from eval_subgoals import EvalSubgoals
+from models.eval.eval_subgoals import EvalSubgoals
 
 
 if __name__ == '__main__':

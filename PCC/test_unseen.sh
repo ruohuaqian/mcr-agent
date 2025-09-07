@@ -1,4 +1,3 @@
-export ALFRED_ROOT=$(pwd)
 for i in {0..50};
 do CUDA_VISIBLE_DEVICES=0 python models/eval/eval_seq2seq.py   \
 	--model_path	exp/PCC/net_epoch_${i}.pth \

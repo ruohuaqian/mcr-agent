@@ -1,12 +1,10 @@
 #!/bin/bash
 
 # Define common variables with Google Drive integration
-ALFRED_ROOT=/content/alfred
 MCR_ROOT=/content/mcr-agent
 DRIVE_ROOT=/content/drive/MyDrive
 
 # 设置环境变量
-export ALFRED_ROOT="$ALFRED_ROOT"
 export MCR_ROOT="$MCR_ROOT"
 
 # Use Google Drive for data storage if available
@@ -14,8 +12,7 @@ if [ -d "$DRIVE_ROOT/json_feat_2.1.0" ]; then
     DATA_PATH="$DRIVE_ROOT/json_feat_2.1.0"
     echo "Using Google Drive dataset: $DATA_PATH"
 else
-    DATA_PATH="$ALFRED_ROOT/data/json_feat_2.1.0"
-    echo "Using local dataset: $DATA_PATH"
+    echo "Find no dataset"
 fi
 
 # Set output to Google Drive
@@ -142,15 +139,13 @@ done
 
 echo "Starting MCR-Agent training with output directory: $DOUT"
 echo "Common arguments: $COMMON_ARGS"
-echo "ALFRED_ROOT: $ALFRED_ROOT"
 
 ################################## Train master policy ##################################
 echo "=== Training Master Policy ==="
 cd ${MCR_ROOT}/MasterPolicy
 
 # 在运行Python之前设置环境变量
-export ALFRED_ROOT="$ALFRED_ROOT"
-export PYTHONPATH="/content/alfred:/content/mcr-agent:/content/mcr-agent/MasterPolicy:$PYTHONPATH"
+export PYTHONPATH="/content/mcr-agent:/content/mcr-agent/MasterPolicy:$PYTHONPATH"
 
 python models/train/train_seq2seq.py \
     --dout ${DOUT}/MasterPolicy \
@@ -176,8 +171,7 @@ subgoals=("CleanObject" "HeatObject" "CoolObject" "SliceObject" "ToggleObject" "
 for subgoal in "${subgoals[@]}"; do
     echo "Training $subgoal..."
     # 确保环境变量设置
-    export ALFRED_ROOT="$ALFRED_ROOT"
-    export PYTHONPATH="/content/alfred:/content/mcr-agent:/content/mcr-agent/Interactions:$PYTHONPATH"
+    export PYTHONPATH="/content/mcr-agent:/content/mcr-agent/Interactions:$PYTHONPATH"
 
     python models/train/train_seq2seq.py \
         --subgoal_analysis=${subgoal} \
@@ -199,8 +193,7 @@ cd ${MCR_ROOT}
 echo "=== Training Policy Composition Controller ==="
 cd ${MCR_ROOT}/PCC
 # 确保环境变量设置
-export ALFRED_ROOT="$ALFRED_ROOT"
-export PYTHONPATH="/content/alfred:/content/mcr-agent:/content/mcr-agent/PCC:$PYTHONPATH"
+export PYTHONPATH="/content/mcr-agent:/content/mcr-agent/PCC:$PYTHONPATH"
 
 python models/train/train_seq2seq.py \
     --dout ${DOUT}/PCC \
@@ -220,8 +213,7 @@ cd ${MCR_ROOT}
 echo "=== Training Object Encoding Module ==="
 cd ${MCR_ROOT}/OEM
 # 确保环境变量设置
-export ALFRED_ROOT="$ALFRED_ROOT"
-export PYTHONPATH="/content/alfred:/content/mcr-agent:/content/mcr-agent/OEM:$PYTHONPATH"
+export PYTHONPATH="/content/mcr-agent:/content/mcr-agent/OEM:$PYTHONPATH"
 
 python models/train/train_seq2seq.py \
     --dout ${DOUT}/OEM \

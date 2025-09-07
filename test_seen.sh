@@ -1,5 +1,3 @@
-export ALFRED_ROOT=$(pwd)
-
 python models/eval/eval_seq2seq.py   \
 		--nav_model_path exp/MasterPolicy/net_epoch_best.pth  \
 		--pickup_model_path exp/PickupObject/net_epoch_best.pth  \
