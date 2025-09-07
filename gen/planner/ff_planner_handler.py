@@ -6,7 +6,7 @@ import shlex
 import subprocess
 import time
 
-import constants
+from gen  import constants
 from utils import game_util
 from utils import py_util
 

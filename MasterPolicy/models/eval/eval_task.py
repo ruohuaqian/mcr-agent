@@ -7,7 +7,7 @@ from eval import Eval
 from env.thor_env import ThorEnv
 
 import torch
-import constants
+from gen  import constants
 import torch.nn.functional as F
 from torchvision.utils import save_image
 from torchvision.transforms.functional import to_tensor

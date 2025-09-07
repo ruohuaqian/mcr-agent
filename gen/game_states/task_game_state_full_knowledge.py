@@ -1,6 +1,6 @@
 import copy
 import sys
-import constants
+from gen  import constants
 import numpy as np
 from game_states.game_state_base import GameStateBase
 from game_states.planned_game_state import PlannedGameState

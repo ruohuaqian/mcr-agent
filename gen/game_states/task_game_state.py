@@ -1,6 +1,6 @@
 import os
 import random
-import constants
+from gen  import constants
 import goal_library as glib
 from game_states.planned_game_state import PlannedGameState
 from utils import game_util

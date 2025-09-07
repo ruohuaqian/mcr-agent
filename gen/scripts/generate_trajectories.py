@@ -14,7 +14,7 @@ import pandas as pd
 from collections import OrderedDict
 from datetime import datetime
 
-import constants
+from gen  import constants
 from agents.deterministic_planner_agent import DeterministicPlannerAgent
 from env.thor_env import ThorEnv
 from game_states.task_game_state_full_knowledge import TaskGameStateFullKnowledge

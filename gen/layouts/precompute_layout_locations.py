@@ -6,7 +6,7 @@ import time
 import cv2
 import numpy as np
 
-import constants
+from gen  import constants
 from utils import game_util
 
 N_PROCS = 40

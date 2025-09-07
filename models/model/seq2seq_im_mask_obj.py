@@ -14,9 +14,12 @@ from gen.utils.image_util import decompress_mask
 from PIL import Image
 
 import constants
-classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp', 'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
+
+classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp',
+                                     'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
 
 from nn.resnet import Resnet
+
 
 class SelfAttn(nn.Module):
     '''
@@ -43,11 +46,9 @@ class Module(Base):
 
         # encoder and self-attention
         self.enc_goal = nn.LSTM(args.demb, args.dhid, bidirectional=True, batch_first=True)
-        self.enc_att_goal = vnn.SelfAttn(args.dhid*2)
+        self.enc_att_goal = vnn.SelfAttn(args.dhid * 2)
         self.enc_instr = nn.LSTM(args.demb, args.dhid, bidirectional=True, batch_first=True)
-        self.enc_att_instr = SelfAttn(args.dhid*2)
-
-
+        self.enc_att_instr = SelfAttn(args.dhid * 2)
 
         # dropouts
         self.vis_dropout = nn.Dropout(args.vis_dropout)
@@ -76,9 +77,9 @@ class Module(Base):
         self.man_action = self.vocab['action_low'].word2index('Manipulate', train=False)
 
         self.objnav_dec = nn.Sequential(
-            nn.Linear(args.dhid*2, args.dhid), nn.ReLU(),
-            nn.Linear(args.dhid, args.dhid//2), nn.ReLU(),
-            nn.Linear(args.dhid//2, 119)
+            nn.Linear(args.dhid * 2, args.dhid), nn.ReLU(),
+            nn.Linear(args.dhid, args.dhid // 2), nn.ReLU(),
+            nn.Linear(args.dhid // 2, 119)
         )
 
     def featurize(self, batch, action_high_order, load_mask=True, load_frames=True):
@@ -99,18 +100,19 @@ class Module(Base):
                 low_to_high_idx = ex['num']['low_to_high_idx']
                 action_high = action_high_order[low_to_high_idx]
                 feat['action_high'].append(action_high)
-                
-            
-                val_action_high = (action_high == self.vocab['action_high'].word2index('GotoLocation', train=False)).astype(np.int64)
-                
-                v=0
-                while v < (len(val_action_high)-1):
-                    if (val_action_high[v] - val_action_high[v+1]) == 1:
-                        val_action_high[v+1] = 1
-                        v+=1
-                    v+=1
-                val_action_high[-1]=1
-            
+
+                val_action_high = (
+                            action_high == self.vocab['action_high'].word2index('GotoLocation', train=False)).astype(
+                    np.int64)
+
+                v = 0
+                while v < (len(val_action_high) - 1):
+                    if (val_action_high[v] - val_action_high[v + 1]) == 1:
+                        val_action_high[v + 1] = 1
+                        v += 1
+                    v += 1
+                val_action_high[-1] = 1
+
             #########
             # inputs
             #########
@@ -137,75 +139,68 @@ class Module(Base):
             alow_manip = []
             obj_high_indices = []
 
-
             if not self.test_mode:
                 for ia, a in enumerate(ex['num']['action_low']):
-                    if val_action_high[ia]==1 and a['action'] in self.vocab['action_low'].word2index(['<<pad>>', '<<seg>>', '<<stop>>', 
-                                                                                                     'LookDown_15', 'LookUp_15',
-                                                                                                     'RotateLeft_90', 'RotateRight_90', 
-                                                                                                     'MoveAhead_25'], train=False):
+                    if val_action_high[ia] == 1 and a['action'] in self.vocab['action_low'].word2index(
+                            ['<<pad>>', '<<seg>>', '<<stop>>',
+                             'LookDown_15', 'LookUp_15',
+                             'RotateLeft_90', 'RotateRight_90',
+                             'MoveAhead_25'], train=False):
                         alow.append(a['action'])
-                    elif val_action_high[ia]==1:
+                    elif val_action_high[ia] == 1:
                         alow.append(self.vocab['action_low'].word2index('Manipulate', train=False))
-                    
-                    if not (a['action'] in self.vocab['action_low'].word2index(['<<pad>>', '<<seg>>', '<<stop>>', 
-                                                                                 'LookDown_15', 'LookUp_15',
-                                                                                 'RotateLeft_90', 'RotateRight_90', 
-                                                                                 'MoveAhead_25'], train=False)):
+
+                    if not (a['action'] in self.vocab['action_low'].word2index(['<<pad>>', '<<seg>>', '<<stop>>',
+                                                                                'LookDown_15', 'LookUp_15',
+                                                                                'RotateLeft_90', 'RotateRight_90',
+                                                                                'MoveAhead_25'], train=False)):
                         alow_manip.append(a['action'])
                         obj_high_indices.append(low_to_high_idx[ia])
-
-                
-
 
                 feat['action_low'].append(alow)
                 feat['action_low_manip'].append(alow_manip)
                 feat['obj_high_indices'].append(obj_high_indices)
 
                 if self.args.subgoal_aux_loss_wt > 0:
-                    feat['subgoals_completed'].append(np.array(ex['num']['low_to_high_idx'])[val_action_high.nonzero()[0].astype(int)] / self.max_subgoals)
+                    feat['subgoals_completed'].append(np.array(ex['num']['low_to_high_idx'])[
+                                                          val_action_high.nonzero()[0].astype(int)] / self.max_subgoals)
 
                 # progress monitor supervision
                 if self.args.pm_aux_loss_wt > 0:
                     num_actions = len(alow)
-                    subgoal_progress = [(i+1)/float(num_actions) for i in range(num_actions)]
+                    subgoal_progress = [(i + 1) / float(num_actions) for i in range(num_actions)]
                     feat['subgoal_progress'].append(subgoal_progress)
-
-
-
 
             obj_list = [self.vocab['objnav'].word2index('<<nav>>')]
             obj_list = [0]
-            high_idx=0
+            high_idx = 0
             # low-level action mask
             if load_mask and not self.test_mode:
                 indices = []
-                
+
                 for a in ex['plan']['low_actions']:
                     if a['api_action']['action'] in ['MoveAhead', 'LookUp', 'LookDown', 'RotateRight', 'RotateLeft']:
-                        if a['high_idx'] == (high_idx+1):
+                        if a['high_idx'] == (high_idx + 1):
                             obj_list.append(0)
 
-                            high_idx+=1
+                            high_idx += 1
                         continue
                     if a['api_action']['action'] == 'PutObject':
                         label = a['api_action']['receptacleObjectId'].split('|')
                     else:
                         label = a['api_action']['objectId'].split('|')
                     indices.append(classes.index(label[4].split('_')[0] if len(label) >= 5 else label[0]))
-                    
-                    if a['high_idx'] == (high_idx+1):
-                        obj_list.append(classes.index((label[4].split('_')[0] if len(label) >= 5 else label[0])))
-                        high_idx+=1 
 
-                new_obj_list = [obj_list[o+1] for o, obj in enumerate(obj_list) if (obj == 0)]
-               
+                    if a['high_idx'] == (high_idx + 1):
+                        obj_list.append(classes.index((label[4].split('_')[0] if len(label) >= 5 else label[0])))
+                        high_idx += 1
+
+                new_obj_list = [obj_list[o + 1] for o, obj in enumerate(obj_list) if (obj == 0)]
+
                 feat['objnav'].append(new_obj_list)
                 feat['action_low_mask_label'].append(indices)
-                
 
-
-        assert(np.all(np.array(list(map(len, feat['lang_instr']))) == np.array(list(map(len, feat['objnav']))))) 
+        assert (np.all(np.array(list(map(len, feat['lang_instr']))) == np.array(list(map(len, feat['objnav'])))))
         # tensorization and padding
         for k, v in feat.items():
             if k in {'lang_goal'}:
@@ -222,7 +217,7 @@ class Module(Base):
                 seqs = [torch.tensor(vvv, device=device) for vv in v for vvv in vv]
                 pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
                 embed_seq = self.emb_word(pad_seq)
-                feat[k] = {'seq': embed_seq, 'len':num_instr} 
+                feat[k] = {'seq': embed_seq, 'len': num_instr}
 
             elif k in {'action_low_mask'}:
                 # mask padding
@@ -238,40 +233,44 @@ class Module(Base):
                 pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
                 feat[k] = pad_seq
             elif k in {'action_high', 'action_high_order'}:
-                seqs = [torch.tensor(vv, device=device, dtype= torch.long) for vv in v]
-                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.vocab['action_high'].word2index('<<pad>>'))
+                seqs = [torch.tensor(vv, device=device, dtype=torch.long) for vv in v]
+                pad_seq = pad_sequence(seqs, batch_first=True,
+                                       padding_value=self.vocab['action_high'].word2index('<<pad>>'))
                 feat[k] = pad_seq
             elif k in {'objnav'}:
-                seqs = [torch.tensor(vvv, device=device, dtype= torch.long) for vv in v for vvv in vv]
+                seqs = [torch.tensor(vvv, device=device, dtype=torch.long) for vv in v for vvv in vv]
                 feat[k] = torch.tensor(seqs)
             else:
                 # default: tensorize and pad sequence
-                seqs = [torch.tensor(vv, device=device, dtype=torch.float if ('frames' in k or 'orientation' in k) else torch.long) for vv in v]
+                seqs = [torch.tensor(vv, device=device,
+                                     dtype=torch.float if ('frames' in k or 'orientation' in k) else torch.long) for vv
+                        in v]
                 pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
                 feat[k] = pad_seq
 
         return feat
 
-
     def serialize_lang_action(self, feat, action_high_order):
         '''
         append segmented instr language and low-level actions into single sequences
         '''
-      
-        assert(len(action_high_order) == len(feat['num']['lang_instr']))
-        
-        action_high_order = (action_high_order == self.vocab['action_high'].word2index('GotoLocation', train=False)).nonzero()[0]
+
+        assert (len(action_high_order) == len(feat['num']['lang_instr']))
+
+        action_high_order = \
+        (action_high_order == self.vocab['action_high'].word2index('GotoLocation', train=False)).nonzero()[0]
         li = []
-        for ai in range(len(action_high_order)-1):
-            li.append([word for desc in feat['num']['lang_instr'][action_high_order[ai]:action_high_order[ai+1]] for word in desc])
-        
+        for ai in range(len(action_high_order) - 1):
+            li.append(
+                [word for desc in feat['num']['lang_instr'][action_high_order[ai]:action_high_order[ai + 1]] for word in
+                 desc])
+
         li.append([word for desc in feat['num']['lang_instr'][action_high_order[-1]:] for word in desc])
 
         feat['num']['lang_instr'] = li
 
         if not self.test_mode:
             feat['num']['action_low'] = [a for a_group in feat['num']['action_low'] for a in a_group]
-
 
     def decompress_mask(self, compressed_mask):
         '''
@@ -281,31 +280,29 @@ class Module(Base):
         mask = np.expand_dims(mask, axis=0)
         return mask
 
-
     def forward(self, feat, max_decode=300):
 
         cont_instr, enc_instr = self.encode_lang_instr(feat['lang_instr']['seq'])
         output = self.objnav_dec(cont_instr)
 
-        res = {'out_obj': output,}
+        res = {'out_obj': output, }
 
         feat.update(res)
         return feat
-
 
     def encode_lang(self, feat):
         '''
         encode goal+instr language
         '''
         emb_lang = feat['lang_goal']
-        
+
         self.lang_dropout(emb_lang.data)
-        
+
         enc_lang, _ = self.enc_goal(emb_lang)
         enc_lang, _ = pad_packed_sequence(enc_lang, batch_first=True)
-        
+
         self.lang_dropout(enc_lang)
-        
+
         cont_lang = self.enc_att_goal(enc_lang)
 
         return cont_lang, enc_lang
@@ -322,8 +319,6 @@ class Module(Base):
 
         return cont_lang_goal_instr, enc_lang_goal_instr
 
-
-
     def reset(self):
         '''
         reset internal states (used for real-time execution during eval)
@@ -336,10 +331,9 @@ class Module(Base):
             'enc_lang_goal': None,
             'cont_lang_instr': None,
             'enc_lang_instr': None,
-            'lang_index':0,
+            'lang_index': 0,
             'enc_obj': None,
         }
-
 
     def step(self, feat, lang_index=0, prev_action=None):
         '''
@@ -348,38 +342,41 @@ class Module(Base):
 
         # encode language features (instr)
         if self.r_state['cont_lang_instr'] is None and self.r_state['enc_lang_instr'] is None:
-            self.r_state['cont_lang_instr'], self.r_state['enc_lang_instr'] = self.dec.encode_lang_instr(feat['lang_instr']['seq'][0][lang_index].unsqueeze(0))
+            self.r_state['cont_lang_instr'], self.r_state['enc_lang_instr'] = self.dec.encode_lang_instr(
+                feat['lang_instr']['seq'][0][lang_index].unsqueeze(0))
             self.r_state['enc_obj'] = self.dec.object_enc(feat['objnav'][0][lang_index].unsqueeze(0))
-
 
         # initialize embedding and hidden states (instr)
         if self.r_state['e_t'] is None and self.r_state['state_t_instr'] is None:
             self.r_state['e_t'] = self.dec.go.repeat(self.r_state['enc_lang_instr'].size(0), 1)
-            self.r_state['state_t_instr'] = self.r_state['cont_lang_instr'], torch.zeros_like(self.r_state['cont_lang_instr'])
+            self.r_state['state_t_instr'] = self.r_state['cont_lang_instr'], torch.zeros_like(
+                self.r_state['cont_lang_instr'])
 
         if lang_index != self.r_state['lang_index']:
-            self.r_state['cont_lang_instr'], self.r_state['enc_lang_instr'] = self.dec.encode_lang_instr(feat['lang_instr']['seq'][0][lang_index].unsqueeze(0))
+            self.r_state['cont_lang_instr'], self.r_state['enc_lang_instr'] = self.dec.encode_lang_instr(
+                feat['lang_instr']['seq'][0][lang_index].unsqueeze(0))
             self.r_state['enc_obj'] = self.dec.object_enc(feat['objnav'][0][lang_index].unsqueeze(0))
             self.r_state['lang_index'] = lang_index
-
-
-        
 
         # previous action embedding
         e_t = self.embed_action(prev_action) if prev_action is not None else self.r_state['e_t']
 
         # decode and save embedding and hidden states
         if self.panoramic:
-
-            out_action_low, state_t_instr, attn_score_t_instr, _, _ = self.dec.step(enc_obj=self.r_state['enc_obj'], 
-                                                                                enc_instr=self.r_state['enc_lang_instr'], 
-                                                                                frame=feat['frames'][:, 0],
-                                                                                frame_left=feat['frames_left'][:, 0],
-                                                                                frame_up=feat['frames_up'][:, 0],
-                                                                                frame_down=feat['frames_down'][:, 0],
-                                                                                frame_right=feat['frames_right'][:, 0],
-                                                                                e_t=e_t, 
-                                                                                state_tm1_instr=self.r_state['state_t_instr'])
+            out_action_low, state_t_instr, attn_score_t_instr, _, _ = self.dec.step(enc_obj=self.r_state['enc_obj'],
+                                                                                    enc_instr=self.r_state[
+                                                                                        'enc_lang_instr'],
+                                                                                    frame=feat['frames'][:, 0],
+                                                                                    frame_left=feat['frames_left'][
+                                                                                        :, 0],
+                                                                                    frame_up=feat['frames_up'][:, 0],
+                                                                                    frame_down=feat['frames_down'][
+                                                                                        :, 0],
+                                                                                    frame_right=feat['frames_right'][
+                                                                                        :, 0],
+                                                                                    e_t=e_t,
+                                                                                    state_tm1_instr=self.r_state[
+                                                                                        'state_t_instr'])
 
         self.r_state['state_t_instr'] = state_t_instr
         self.r_state['e_t'] = self.dec.emb(out_action_low.max(1)[1])
@@ -389,15 +386,15 @@ class Module(Base):
 
         return feat
 
-
     def extract_preds(self, out, batch, feat, clean_special_tokens=True):
         '''
         output processing
         '''
         pred = {}
-        for (ex, _), alow, alow_mask in zip(batch, feat['out_action_low'].max(2)[1].tolist(), feat['out_action_low_mask']):
+        for (ex, _), alow, alow_mask in zip(batch, feat['out_action_low'].max(2)[1].tolist(),
+                                            feat['out_action_low_mask']):
             # remove padding tokens
-            
+
             if self.pad in alow:
                 pad_start_idx = alow.index(self.pad)
                 alow = alow[:pad_start_idx]
@@ -419,7 +416,6 @@ class Module(Base):
 
         return pred
 
-
     def embed_action(self, action):
         '''
         embed low-level action
@@ -428,7 +424,6 @@ class Module(Base):
         action_num = torch.tensor(self.vocab['action_low'].word2index(action), device=device)
         action_emb = self.dec.emb(action_num).unsqueeze(0)
         return action_emb
-
 
     def compute_loss(self, out, batch, feat):
         '''
@@ -443,7 +438,6 @@ class Module(Base):
 
         return losses
 
-
     def weighted_mask_loss(self, pred_masks, gt_masks):
         '''
         mask loss that accounts for weight-imbalance between 0 and 1 pixels
@@ -454,7 +448,6 @@ class Module(Base):
         outside = (bce * flipped_mask).sum() / (flipped_mask).sum()
         return inside + outside
 
-
     def flip_tensor(self, tensor, on_zero=1, on_non_zero=0):
         '''
         flip 0 and 1 values in tensor
@@ -463,7 +456,6 @@ class Module(Base):
         res[tensor == 0] = on_zero
         res[tensor != 0] = on_non_zero
         return res
-
 
     def compute_metric(self, preds, data):
         '''
@@ -480,4 +472,4 @@ class Module(Base):
             # except:
             #     print("KeyError in valid")
             #     pass
-        return {k: sum(v)/len(v) for k, v in m.items()}
+        return {k: sum(v) / len(v) for k, v in m.items()}

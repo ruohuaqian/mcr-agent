@@ -1,7 +1,7 @@
 import copy
 import json
 import os
-import constants
+from gen  import constants
 from game_states.game_state_base import GameStateBase
 from planner import ff_planner_handler
 from utils import game_util

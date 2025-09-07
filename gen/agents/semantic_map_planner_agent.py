@@ -1,6 +1,6 @@
 import glob
 import cv2
-import constants
+from gen  import constants
 from agents.agent_base import AgentBase
 from agents.plan_agent import PlanAgent
 from game_states.planned_game_state import PlannedGameState
