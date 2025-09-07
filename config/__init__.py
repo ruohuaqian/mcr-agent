@@ -88,17 +88,3 @@ class ConfigManager:
 
 # Initialize config manager
 config_manager = ConfigManager()
-
-# Use the custom import function
-try:
-    seq2seq_module = config_manager.import_with_override('models.model.seq2seq_im_mask_sub')
-    print("Successfully imported module with override")
-except Exception as e:
-    print(f"Error importing module: {e}")
-    # Fallback to regular import
-    try:
-        import models.model.seq2seq_im_mask_sub
-
-        print("Successfully imported module without override")
-    except Exception as e:
-        print(f"Failed to import module: {e}")
