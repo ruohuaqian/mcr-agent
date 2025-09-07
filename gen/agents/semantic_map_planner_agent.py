@@ -1,9 +1,9 @@
 import glob
 import cv2
-from gen  import constants
-from agents.agent_base import AgentBase
-from agents.plan_agent import PlanAgent
-from game_states.planned_game_state import PlannedGameState
+from gen import constants
+from gen.agents.agent_base import AgentBase
+from gen.agents.plan_agent import PlanAgent
+from gen.game_states.planned_game_state import PlannedGameState
 
 
 class SemanticMapPlannerAgent(AgentBase):

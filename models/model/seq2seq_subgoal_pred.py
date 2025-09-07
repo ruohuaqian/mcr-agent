@@ -8,7 +8,7 @@ import numpy as np
 from torch import nn
 from tensorboardX import SummaryWriter
 from tqdm import trange
-from gen  import constants
+from models.model import constants
 classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp', 'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
 import torch.nn.functional as F
 

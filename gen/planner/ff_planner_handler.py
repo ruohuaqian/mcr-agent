@@ -7,8 +7,8 @@ import subprocess
 import time
 
 from gen  import constants
-from utils import game_util
-from utils import py_util
+from gen.utils import game_util
+from gen.utils import py_util
 
 DEBUG = False
 

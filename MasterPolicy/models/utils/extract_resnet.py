@@ -1,12 +1,7 @@
-import os
-import sys
-sys.path.append(os.path.join(os.environ['ALFRED_ROOT']))
-sys.path.append(os.path.join(os.environ['ALFRED_ROOT'], 'models'))
-
 import torch
 import os
 from PIL import Image
-from nn.resnet import Resnet
+from MasterPolicy.models.nn.resnet import Resnet
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
 import numpy as np

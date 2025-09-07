@@ -1,9 +1,9 @@
 import os
 import random
 from gen  import constants
-import goal_library as glib
-from game_states.planned_game_state import PlannedGameState
-from utils import game_util
+import gen.goal_library as glib
+from gen.game_states.planned_game_state import PlannedGameState
+from gen.utils import game_util
 
 
 class TaskGameState(PlannedGameState):

@@ -1,7 +1,7 @@
 import argparse
 import torch.multiprocessing as mp
 from eval_task import EvalTask
-from models.eval.eval_subgoals import EvalSubgoals
+from Interactions.models.eval.eval_subgoals import EvalSubgoals
 
 
 if __name__ == '__main__':

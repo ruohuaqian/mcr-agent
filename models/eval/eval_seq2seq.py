@@ -1,5 +1,3 @@
-import os
-import sys
 import argparse
 import torch.multiprocessing as mp
 from eval_task import EvalTask

@@ -1,10 +1,4 @@
 import os
-import sys
-sys.path.append(os.path.join(os.environ['ALFRED_ROOT']))
-sys.path.append(os.path.join(os.environ['ALFRED_ROOT'], 'models'))
-sys.path.append(os.path.join(os.environ['ALFRED_ROOT'], 'gen'))
-
-import os
 import torch
 import pprint
 import json
@@ -12,7 +6,7 @@ from vocab import Vocab
 from data.preprocess import Dataset
 from importlib import import_module
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
-from models.utils.helper_utils import optimizer_to
+from MasterPolicy.models.utils.helper_utils import optimizer_to
 
 torch.backends.cudnn.enabled = False
 

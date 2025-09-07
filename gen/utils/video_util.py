@@ -1,5 +1,5 @@
 import subprocess
-from gen  import constants
+from gen import constants
 
 class VideoSaver(object):
 

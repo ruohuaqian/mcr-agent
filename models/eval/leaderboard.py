@@ -8,7 +8,7 @@ from env.thor_env import ThorEnv
 import torch.multiprocessing as mp
 
 import torch
-from gen  import constants
+from models.model import constants
 import torch.nn.functional as F
 from torchvision.transforms.functional import to_tensor
 from torchvision.models.detection import maskrcnn_resnet50_fpn
