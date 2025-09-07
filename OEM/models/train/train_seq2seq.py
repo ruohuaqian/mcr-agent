@@ -6,7 +6,7 @@ from vocab import Vocab
 from data.preprocess import Dataset
 from importlib import import_module
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
-from models.utils.helper_utils import optimizer_to
+from OEM.models.utils.helper_utils import optimizer_to
 
 torch.backends.cudnn.enabled = False
 

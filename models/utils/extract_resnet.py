@@ -7,6 +7,7 @@ from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 import numpy as np
 from tqdm import tqdm
 
+
 # img   : PIL.Image
 # rtype : str
 def randomize(img, rtype):
