@@ -1,5 +1,5 @@
 for i in {0..30}; do
-  CUDA_VISIBLE_DEVICES=0 python OEM/models/eval/eval_seq2seq.py \
+  CUDA_VISIBLE_DEVICES=0 python models/eval/eval_seq2seq.py \
     --model_path exp/extraFC/net_epoch_${i}.pth \
     --eval_split valid_unseen \
     --model models.model.seq2seq_im_mask_obj \
