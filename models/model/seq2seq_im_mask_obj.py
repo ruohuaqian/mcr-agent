@@ -2,7 +2,7 @@ import os
 import cv2
 import torch
 import numpy as np
-import nn.vnn as vnn
+import models.nn.vnn as vnn
 import collections
 from torch import nn
 from torch.nn import functional as F

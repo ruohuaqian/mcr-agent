@@ -8,7 +8,6 @@ class Resnet18(object):
     '''
     pretrained Resnet18 from torchvision
     '''
-
     def __init__(self, args, eval=True, share_memory=False, use_conv_feat=True):
         self.model = models.resnet18(pretrained=True)
 
