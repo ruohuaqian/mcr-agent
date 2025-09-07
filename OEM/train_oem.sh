@@ -4,8 +4,8 @@ set -euo pipefail
 # ========= default =========
 MCR_ROOT=${MCR_ROOT:-/content/mcr-agent}
 DRIVE_ROOT=${DRIVE_ROOT:-/content/drive/MyDrive}
-DATA_DEFAULT_JSON=${ALFRED_ROOT}/data/json_feat_2.1.0
-SPLITS_DEFAULT_JSON=${ALFRED_ROOT}/data/splits/oct21.json
+DATA_DEFAULT_JSON=${DRIVE_ROOT}/data/json_feat_2.1.0
+SPLITS_DEFAULT_JSON=${DRIVE_ROOT}/data/splits/oct21.json
 
 # ========= default superparameters（与 argparse 对齐）=========
 SEED=123
@@ -118,14 +118,13 @@ if [[ ! -d "$DATA" ]]; then
 fi
 
 # ========= 环境准备 =========
-export ALFRED_ROOT="$ALFRED_ROOT"
 export MCR_ROOT="$MCR_ROOT"
 mkdir -p "$DOUT"
 mkdir -p "${MCR_ROOT}/exp"
 ln -sfn "$DOUT" "${MCR_ROOT}/exp/OEM"
 
 # PYTHONPATH 指向 OEM 子项目（避免串用 ALFRED 的实现）
-export PYTHONPATH="${ALFRED_ROOT}:${MCR_ROOT}:${MCR_ROOT}/OEM:${PYTHONPATH}"
+export PYTHONPATH="${MCR_ROOT}:${MCR_ROOT}/OEM:${PYTHONPATH}"
 
 cd "${MCR_ROOT}/OEM"
 
@@ -173,7 +172,6 @@ CMD=( python models/train/train_seq2seq.py
 [[ "$FAST_EPOCH" -eq 1 ]] && CMD+=( --fast_epoch )
 [[ "$DATASET_FRACTION" -gt 0 ]] && CMD+=( --dataset_fraction "$DATASET_FRACTION" )
 
-echo "[INFO] ALFRED_ROOT = $ALFRED_ROOT"
 echo "[INFO] MCR_ROOT    = $MCR_ROOT"
 echo "[INFO] DOUT        = $DOUT"
 echo "[INFO] MODEL       = $MODEL"

@@ -1,12 +1,7 @@
-import os
-import sys
-sys.path.append(os.path.join(os.environ['ALFRED_ROOT']))
-sys.path.append(os.path.join(os.environ['ALFRED_ROOT'], 'gen'))
-
 import json
 import glob
 import os
-from gen  import constants
+from gen import constants
 import cv2
 import shutil
 import numpy as np
