@@ -18,37 +18,27 @@ DEFAULT_RENDER_SETTINGS = {'renderImage': True,
                            }
 
 # env/thor_env.py
-import os
-import time
 import subprocess
-from ai2thor.controller import Controller
 
-# 可调整的默认参数
 DEFAULT_DISPLAY = ":99"
-DEFAULT_SCREEN = "1024x768x24"
 
-def _log(msg):  # simple log
-    print(f"[ThorEnv] {msg}")
+def _log(msg): print(f"[ThorEnv] {msg}")
 
 def _ensure_env_flags():
-    """
-    彻底禁用 Vulkan，强制 OpenGL（llvmpipe），并给 SDL/GL 一些兼容提示
-    """
-    for k in ["AI2THOR_PLATFORM", "AI2THOR_COMMIT_ID", "AI2THOR_BRANCH",
-              "AI2THOR_LOCAL_BUILD", "VK_ICD_FILENAMES"]:
+    # Completely disable Vulkan, force OpenGL software rendering
+    for k in ["AI2THOR_PLATFORM","AI2THOR_COMMIT_ID","AI2THOR_BRANCH","AI2THOR_LOCAL_BUILD","VK_ICD_FILENAMES"]:
         os.environ.pop(k, None)
-    os.environ.setdefault("AI2THOR_USE_VULKAN", "0")
-    os.environ["UNITY_DISABLE_VULKAN"] = "1"
-    os.environ["UNITY_FORCE_OPENGL"] = "1"
-    os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
-    os.environ["GALLIUM_DRIVER"] = "llvmpipe"
-    os.environ.setdefault("MESA_GL_VERSION_OVERRIDE", "3.3")
-    os.environ.setdefault("SDL_VIDEODRIVER", "x11")
-    os.environ.setdefault("XDG_RUNTIME_DIR", "/tmp")
+    os.environ.setdefault("AI2THOR_USE_VULKAN","0")
+    os.environ["UNITY_DISABLE_VULKAN"]="1"
+    os.environ["UNITY_FORCE_OPENGL"]="1"
+    os.environ["LIBGL_ALWAYS_SOFTWARE"]="1"
+    os.environ["GALLIUM_DRIVER"]="llvmpipe"
+    os.environ.setdefault("MESA_GL_VERSION_OVERRIDE","3.3")
+    os.environ.setdefault("SDL_VIDEODRIVER","x11")
+    os.environ.setdefault("XDG_RUNTIME_DIR","/tmp")
 
-def _have_x_server(display: str) -> bool:
-    env = os.environ.copy()
-    env["DISPLAY"] = display
+def _x_alive(display: str) -> bool:
+    env = os.environ.copy(); env["DISPLAY"]=display
     try:
         r = subprocess.run(["xdpyinfo"], env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -56,113 +46,54 @@ def _have_x_server(display: str) -> bool:
     except FileNotFoundError:
         return False
 
-def _start_xvfb(display: str = DEFAULT_DISPLAY, screen: str = DEFAULT_SCREEN):
-    """
-    启动一个 Xvfb :99，如果已存在就复用
-    """
-    os.environ["DISPLAY"] = display
-    if _have_x_server(display):
-        _log(f"检测到现有 X server (DISPLAY={display})，复用。")
-        return None  # 不需要我们维护的进程
-
-    # 尝试安装必要组件（在 Colab 上 apt 可用；已装会跳过）
-    _log("安装 X/OpenGL 组件（若已安装会跳过）...")
-    try:
-        subprocess.run(["apt-get", "update", "-y"], check=False,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run([
-            "apt-get", "install", "-y",
-            "xvfb", "x11-utils", "mesa-utils", "libgl1-mesa-glx", "libglu1-mesa"
-        ], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        # 某些环境可能没有 sudo/apt，忽略安装错误，直接尝试启动
-        pass
-
-    _log(f"启动 Xvfb 于 {display} (screen={screen}) ...")
-    proc = subprocess.Popen(
-        ["Xvfb", display, "-screen", "0", screen, "-ac",
-         "+extension", "GLX", "+render", "-noreset"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
-
-    # 等待 X server 就绪
-    for _ in range(30):
-        if _have_x_server(display):
-            break
-        time.sleep(0.2)
-    if not _have_x_server(display):
-        _log("警告：Xvfb 启动可能失败，但继续尝试。")
-
-    # 可选：探测 GLX
-    try:
-        subprocess.run(["glxinfo", "-B"], env=os.environ.copy(),
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except FileNotFoundError:
-        pass
-
-    return proc
-
 class ThorEnv(Controller):
     """
-    adopt to Colab's AI2-THOR env
-    - ban Vulkan，force to OpenGL
-    - use/reuse Xvfb :99
-    - only start when __init__ (ai2thor >=3.0.0)
+    Colab/GPU-free friendly:
+      - Force OpenGL, headless=True (no real window required)
+      - Reuse existing :99 (assumes main process has set up Xvfb)
+      - Start Unity only in __init__, once
     """
-
     def __init__(
         self,
-        # 你项目里的常量，可按需替换
         x_display: str = DEFAULT_DISPLAY,
-        player_screen_height: int = 300,
-        player_screen_width: int = 300,
-        quality: str = "Low",                   # Colab 软件渲染建议 Low
-        build_path: str | None = None,          # 为空则使用内置下载版
+        width: int = 300,
+        height: int = 300,
+        quality: str = "Low",
+        build_path: str | None = None,
         use_virtual_display: bool = True,
-        vdisplay_screen: str = DEFAULT_SCREEN,  # "宽x高x色深"
+        rendering_engine: str = "OpenGL",   # Explicit declaration
+        headless: bool = True,              # Key: True
     ):
-        self._xvfb_proc = None
         _ensure_env_flags()
 
         if use_virtual_display:
-            # 启动或复用 Xvfb
-            self._xvfb_proc = _start_xvfb(x_display, vdisplay_screen)
+            # Do not start Xvfb here; only reuse existing :99 (main process handles startup)
             os.environ["DISPLAY"] = x_display
+            if _x_alive(x_display):
+                _log(f"Detected existing X server (DISPLAY={x_display}), reusing.")
+            else:
+                _log(f"Warning: No X server detected at {x_display}, but attempting to proceed in headless mode.")
         else:
-            # 尊重已有 DISPLAY
-            if "DISPLAY" not in os.environ:
-                os.environ["DISPLAY"] = x_display
+            # If not using virtual display, still set DISPLAY to avoid SDL errors
+            os.environ.setdefault("DISPLAY", x_display)
 
-        # 只调用一次：在构造器里完成启动
+        # Start Unity only once
         super().__init__(
             quality=quality,
-            local_executable_path=build_path,  # None 则使用 pip 版内置 build
-            x_display=os.environ["DISPLAY"],
-            width=player_screen_width,
-            height=player_screen_height,
-            # 部分版本支持：renderingEngine="OpenGL"
+            local_executable_path=build_path,
+            x_display=os.environ.get("DISPLAY", x_display),
+            width=width,
+            height=height,
+            headless=headless,                  # Force headless mode
+            renderingEngine=rendering_engine,   # Explicit OpenGL
         )
-
-        self.task = None
-        self.cleaned_objects = set()
-        self.cooled_objects = set()
-        self.heated_objects = set()
-
-        _log(f"started. DISPLAY={os.environ.get('DISPLAY')} quality={quality}")
+        _log(f"started: headless={headless}, engine={rendering_engine}, DISPLAY={os.environ.get('DISPLAY')}")
 
     def stop(self):
-        """关闭 Unity 和 Xvfb（如由我们启动）"""
         try:
             super().stop()
         finally:
-            if self._xvfb_proc is not None:
-                _log("停止 Xvfb ...")
-                try:
-                    self._xvfb_proc.terminate()
-                except Exception:
-                    pass
-                self._xvfb_proc = None
-
+            _log("stopped.")
     def reset(self, scene_name_or_num,
               grid_size=constants.AGENT_STEP_SIZE / constants.RECORD_SMOOTHING_FACTOR,
               camera_y=constants.CAMERA_HEIGHT_OFFSET,
