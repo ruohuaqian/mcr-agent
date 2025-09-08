@@ -351,9 +351,9 @@ class ConvFrameMaskDecoderProgressMonitor(nn.Module):
     action decoder with subgoal and progress monitoring
     '''
 
-    def __init__(self, emb, dframe, dhid, pframe=300,
+    def __init__(self, vocab, args, emb, dframe, dhid, pframe=300,
                  attn_dropout=0., hstate_dropout=0., actor_dropout=0., input_dropout=0.,
-                 teacher_forcing=False):
+                 teacher_forcing=False, panoramic=False, orientation=False):
         super().__init__()
         demb = emb.weight.size(1)
 
