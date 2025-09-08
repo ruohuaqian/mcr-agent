@@ -22,113 +22,100 @@ import subprocess
 
 DEFAULT_DISPLAY = ":99"
 
-def _log(msg): print(f"[ThorEnv] {msg}")
-
-def _x_alive(display: str) -> bool:
-    env = os.environ.copy(); env["DISPLAY"]=display
-    try:
-        r = subprocess.run(["xdpyinfo"], env=env,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return r.returncode == 0
-    except FileNotFoundError:
-        return False
 
 class ThorEnv(Controller):
-    """
-    Colab/GPU-free friendly:
-      - Force OpenGL, headless=True (no real window required)
-      - Reuse existing :99 (assumes main process has set up Xvfb)
-      - Start Unity only in __init__, once
-    """
+    '''
+       an extension of ai2thor.controller.Controller for ALFRED tasks
+    '''
+
     def __init__(
         self,
-        x_display: str = DEFAULT_DISPLAY,
-        width: int = 300,
-        height: int = 300,
-        quality: str = "Low",
-        build_path: str | None = None,
+        x_display: str = constants.X_DISPLAY,
+        player_screen_height: int = constants.DETECTION_SCREEN_HEIGHT,
+        player_screen_width: int = constants.DETECTION_SCREEN_WIDTH,
+        quality: str = "MediumCloseFitShadows",
         use_virtual_display: bool = True,
-        rendering_engine: str = "OpenGL",   # Explicit declaration
-        headless: bool = True,              # Key: True
+        rendering_engine: str = "OpenGL",
+        build_path=constants.BUILD_PATH,
     ):
-        if use_virtual_display:
-            # Do not start Xvfb here; only reuse existing :99 (main process handles startup)
-            os.environ["DISPLAY"] = x_display
-            if _x_alive(x_display):
-                _log(f"Detected existing X server (DISPLAY={x_display}), reusing.")
-            else:
-                _log(f"Warning: No X server detected at {x_display}, but attempting to proceed in headless mode.")
-        else:
-            # If not using virtual display, still set DISPLAY to avoid SDL errors
-            os.environ.setdefault("DISPLAY", x_display)
+        # --- define all attributes BEFORE super().__init__ (Controller may call reset) ---
+        self._display = None
+        self.local_executable_path = build_path
+        self.task = None
+        self.cleaned_objects = set()
+        self.cooled_objects = set()
+        self.heated_objects = set()
 
-        # Start Unity only once
+        # start virtual display (Xvfb) if requested
+        if use_virtual_display:
+            # size=(width, height); 给 Xvfb 一个 >= 渲染窗口的尺寸
+            self._display = Display(visible=0, size=(max(1024, player_screen_width), max(768, player_screen_height)), color_depth=24)
+            self._display.start()
+            os.environ["DISPLAY"] = f":{self._display.display}"
+
+        # graphics env hints
+        os.environ.setdefault("AI2THOR_USE_VULKAN", "0")  # force OpenGL path
+        os.environ.setdefault("MESA_GL_VERSION_OVERRIDE", "3.3")
+        os.environ.setdefault("SDL_VIDEODRIVER", "x11")
+
+        # IMPORTANT: width=player_screen_width, height=player_screen_height
         super().__init__(
             quality=quality,
             local_executable_path=build_path,
             x_display=os.environ.get("DISPLAY", x_display),
-            width=width,
-            height=height,
-            headless=headless,                  # Force headless mode
-            renderingEngine=rendering_engine,   # Explicit OpenGL
+            width=player_screen_width,
+            height=player_screen_height,
+            renderingEngine=rendering_engine,
         )
-        _log(f"started: headless={headless}, engine={rendering_engine}, DISPLAY={os.environ.get('DISPLAY')}")
+        print(f"ThorEnv started: engine={rendering_engine}, DISPLAY={os.environ.get('DISPLAY')}")
 
     def stop(self):
         try:
             super().stop()
         finally:
-            _log("stopped.")
+            if getattr(self, "_display", None) is not None:
+                try:
+                    self._display.stop()
+                finally:
+                    self._display = None
+            print("stopped.")
 
     def reset(
-            self,
-            scene_name_or_num,
-            grid_size=constants.AGENT_STEP_SIZE / constants.RECORD_SMOOTHING_FACTOR,
-            camera_y=constants.CAMERA_HEIGHT_OFFSET,
-            render_image=constants.RENDER_IMAGE,
-            render_depth_image=constants.RENDER_DEPTH_IMAGE,
-            render_class_image=constants.RENDER_CLASS_IMAGE,
-            render_object_image=constants.RENDER_OBJECT_IMAGE,
-            visibility_distance=constants.VISIBILITY_DISTANCE
+        self,
+        scene_name_or_num,
+        grid_size=constants.AGENT_STEP_SIZE / constants.RECORD_SMOOTHING_FACTOR,
+        camera_y=constants.CAMERA_HEIGHT_OFFSET,
+        render_image=constants.RENDER_IMAGE,
+        render_depth_image=constants.RENDER_DEPTH_IMAGE,
+        render_class_image=constants.RENDER_CLASS_IMAGE,
+        render_object_image=constants.RENDER_OBJECT_IMAGE,
+        visibility_distance=constants.VISIBILITY_DISTANCE,
     ):
-        '''
-        reset scene and task states
-        '''
+        """reset scene and task states"""
         print("Resetting ThorEnv")
 
-        if type(scene_name_or_num) == str:
-            scene_name = scene_name_or_num
-        else:
-            scene_name = 'FloorPlan%d' % scene_name_or_num
-
+        scene_name = scene_name_or_num if isinstance(scene_name_or_num, str) else f"FloorPlan{scene_name_or_num}"
         super().reset(scene_name)
+
         event = super().step(
             action="Initialize",
             gridSize=grid_size,
             cameraY=camera_y,
             renderImage=render_image,
             renderDepthImage=render_depth_image,
-            # 下面两项在 AI2-THOR 4.x 更推荐：
-            # renderSemanticSegmentation=render_class_image,
-            # renderInstanceSegmentation=render_object_image,
-            # 如果你仍在用旧键也可，但别混用
-
-            renderClassImage=render_class_image,
-            renderObjectImage=render_object_image,
-            visibilityDistance=visibility_distance,  # ← 注意驼峰
+            renderSemanticSegmentation=render_class_image,
+            renderInstanceSegmentation=render_object_image,
+            visibilityDistance=visibility_distance,
             makeAgentsVisible=False,
         )
         if not event.metadata.get("lastActionSuccess", True):
-            raise RuntimeError(
-                f"Initialize failed: {event.metadata.get('errorMessage', '')}"
-            )
-        # reset task if specified
-        if self.task is not None:
+            raise RuntimeError(f"Initialize failed: {event.metadata.get('errorMessage', '')}")
+
+        # guard: Controller.__init__ 期间第一次进入时，task 可能尚未设定
+        if getattr(self, "task", None) is not None:
             self.task.reset()
 
-        # clear object state changes
         self.reset_states()
-
         return event
 
     def reset_states(self):
