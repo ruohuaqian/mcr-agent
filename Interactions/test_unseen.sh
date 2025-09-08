@@ -61,13 +61,15 @@ for subgoal in "${subgoals[@]}"; do
     fi
 
     echo "[RUN] epoch $i -> $CKPT"
-    CUDA_VISIBLE_DEVICES=3 python models/eval/eval_seq2seq.py \
+    CUDA_VISIBLE_DEVICES=0 python models/eval/eval_seq2seq.py \
       --model_path "$CKPT" \
       --eval_split valid_unseen \
       --model Interactions.models.model.seq2seq_im_mask_sub \
       --data "$DATA" \
       --splits "$SPLITS" \
       --gpu \
+      --preprocess \
+      --fast_epoch \
       --num_threads 1 \
       --max_steps 400 \
       --max_fails 10 \

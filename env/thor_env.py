@@ -17,11 +17,6 @@ DEFAULT_RENDER_SETTINGS = {'renderImage': True,
                            'renderObjectImage': False,
                            }
 
-# env/thor_env.py
-import subprocess
-
-DEFAULT_DISPLAY = ":99"
-
 
 class ThorEnv(Controller):
     '''
