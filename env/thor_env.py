@@ -17,52 +17,130 @@ DEFAULT_RENDER_SETTINGS = {'renderImage': True,
                            'renderObjectImage': False,
                            }
 
+# env/thor_env.py
+import os
+import time
+import subprocess
+from ai2thor.controller import Controller
+
+# 可调整的默认参数
+DEFAULT_DISPLAY = ":99"
+DEFAULT_SCREEN = "1024x768x24"
+
+def _log(msg):  # simple log
+    print(f"[ThorEnv] {msg}")
+
+def _ensure_env_flags():
+    """
+    彻底禁用 Vulkan，强制 OpenGL（llvmpipe），并给 SDL/GL 一些兼容提示
+    """
+    for k in ["AI2THOR_PLATFORM", "AI2THOR_COMMIT_ID", "AI2THOR_BRANCH",
+              "AI2THOR_LOCAL_BUILD", "VK_ICD_FILENAMES"]:
+        os.environ.pop(k, None)
+    os.environ.setdefault("AI2THOR_USE_VULKAN", "0")
+    os.environ["UNITY_DISABLE_VULKAN"] = "1"
+    os.environ["UNITY_FORCE_OPENGL"] = "1"
+    os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
+    os.environ["GALLIUM_DRIVER"] = "llvmpipe"
+    os.environ.setdefault("MESA_GL_VERSION_OVERRIDE", "3.3")
+    os.environ.setdefault("SDL_VIDEODRIVER", "x11")
+    os.environ.setdefault("XDG_RUNTIME_DIR", "/tmp")
+
+def _have_x_server(display: str) -> bool:
+    env = os.environ.copy()
+    env["DISPLAY"] = display
+    try:
+        r = subprocess.run(["xdpyinfo"], env=env,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return r.returncode == 0
+    except FileNotFoundError:
+        return False
+
+def _start_xvfb(display: str = DEFAULT_DISPLAY, screen: str = DEFAULT_SCREEN):
+    """
+    启动一个 Xvfb :99，如果已存在就复用
+    """
+    os.environ["DISPLAY"] = display
+    if _have_x_server(display):
+        _log(f"检测到现有 X server (DISPLAY={display})，复用。")
+        return None  # 不需要我们维护的进程
+
+    # 尝试安装必要组件（在 Colab 上 apt 可用；已装会跳过）
+    _log("安装 X/OpenGL 组件（若已安装会跳过）...")
+    try:
+        subprocess.run(["apt-get", "update", "-y"], check=False,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run([
+            "apt-get", "install", "-y",
+            "xvfb", "x11-utils", "mesa-utils", "libgl1-mesa-glx", "libglu1-mesa"
+        ], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        # 某些环境可能没有 sudo/apt，忽略安装错误，直接尝试启动
+        pass
+
+    _log(f"启动 Xvfb 于 {display} (screen={screen}) ...")
+    proc = subprocess.Popen(
+        ["Xvfb", display, "-screen", "0", screen, "-ac",
+         "+extension", "GLX", "+render", "-noreset"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+
+    # 等待 X server 就绪
+    for _ in range(30):
+        if _have_x_server(display):
+            break
+        time.sleep(0.2)
+    if not _have_x_server(display):
+        _log("警告：Xvfb 启动可能失败，但继续尝试。")
+
+    # 可选：探测 GLX
+    try:
+        subprocess.run(["glxinfo", "-B"], env=os.environ.copy(),
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except FileNotFoundError:
+        pass
+
+    return proc
+
 class ThorEnv(Controller):
-    '''
-    an extension of ai2thor.controller.Controller for ALFRED tasks
-    '''
+    """
+    adopt to Colab's AI2-THOR env
+    - ban Vulkan，force to OpenGL
+    - use/reuse Xvfb :99
+    - only start when __init__ (ai2thor >=3.0.0)
+    """
+
     def __init__(
         self,
-        x_display=constants.X_DISPLAY,
-        player_screen_height=constants.DETECTION_SCREEN_HEIGHT,
-        player_screen_width=constants.DETECTION_SCREEN_WIDTH,
-        quality='MediumCloseFitShadows',
-        build_path=constants.BUILD_PATH,
-        use_virtual_display=True,
-        vdisplay_size=(1024, 768),
-        vdisplay_color_depth=24,
+        # 你项目里的常量，可按需替换
+        x_display: str = DEFAULT_DISPLAY,
+        player_screen_height: int = 300,
+        player_screen_width: int = 300,
+        quality: str = "Low",                   # Colab 软件渲染建议 Low
+        build_path: str | None = None,          # 为空则使用内置下载版
+        use_virtual_display: bool = True,
+        vdisplay_screen: str = DEFAULT_SCREEN,  # "宽x高x色深"
     ):
-        self._display = None
+        self._xvfb_proc = None
+        _ensure_env_flags()
 
-        # 1) Ensure a 24-bit X display exists (or create one)
         if use_virtual_display:
-            # If DISPLAY is unset or you want to force a clean virtual display, spin one up
-            self._display = Display(
-                visible=0,
-                size=vdisplay_size,
-                color_depth=vdisplay_color_depth
-            )
-            self._display.start()
-            # point ai2thor to this display
-            x_display = f":{self._display.display}"
-            os.environ["DISPLAY"] = x_display  # for libraries that read DISPLAY directly
+            # 启动或复用 Xvfb
+            self._xvfb_proc = _start_xvfb(x_display, vdisplay_screen)
+            os.environ["DISPLAY"] = x_display
+        else:
+            # 尊重已有 DISPLAY
+            if "DISPLAY" not in os.environ:
+                os.environ["DISPLAY"] = x_display
 
-        # 2) Optional GL hints that help on some headless boxes (harmless otherwise)
-        os.environ.setdefault("MESA_GL_VERSION_OVERRIDE", "3.3")
-        os.environ.setdefault("SDL_VIDEODRIVER", "x11")
-
-        # 3) Initialize Controller
+        # 只调用一次：在构造器里完成启动
         super().__init__(
             quality=quality,
-            local_executable_path=build_path,
-            # you can also pass width/height here if you prefer
-        )
-
-        # 4) Start AI2-THOR tied to our (virtual) X display
-        self.start(
-            x_display=x_display,
-            player_screen_height=player_screen_height,
-            player_screen_width=player_screen_width,
+            local_executable_path=build_path,  # None 则使用 pip 版内置 build
+            x_display=os.environ["DISPLAY"],
+            width=player_screen_width,
+            height=player_screen_height,
+            # 部分版本支持：renderingEngine="OpenGL"
         )
 
         self.task = None
@@ -70,7 +148,20 @@ class ThorEnv(Controller):
         self.cooled_objects = set()
         self.heated_objects = set()
 
-        print(f"ThorEnv started on DISPLAY={os.environ.get('DISPLAY', x_display)}.")
+        _log(f"started. DISPLAY={os.environ.get('DISPLAY')} quality={quality}")
+
+    def stop(self):
+        """关闭 Unity 和 Xvfb（如由我们启动）"""
+        try:
+            super().stop()
+        finally:
+            if self._xvfb_proc is not None:
+                _log("停止 Xvfb ...")
+                try:
+                    self._xvfb_proc.terminate()
+                except Exception:
+                    pass
+                self._xvfb_proc = None
 
     def reset(self, scene_name_or_num,
               grid_size=constants.AGENT_STEP_SIZE / constants.RECORD_SMOOTHING_FACTOR,
