@@ -1,99 +1,78 @@
-for i in {0..20};
-do CUDA_VISIBLE_DEVICES=3 python models/eval/eval_seq2seq.py   \
-	--model_path	exp/CleanObject/net_epoch_${i}.pth \
-	--eval_split	valid_unseen                          \
-	--model		models.model.seq2seq_im_mask        \
-	--data		data/json_feat_2.1.0                \
-	--gpu                                               \
-	--max_step	400                                 \
-	--max_fail	10                                  \
-	--num_threads	1 \
-	--subgoals CleanObject \
-	--skip_model_unroll_with_expert
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ---------- 参数解析 ----------
+DOUT=""
+SPLITS=""
+DATA=""
+PREPROCESS=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dout) DOUT="$2"; shift 2;;
+    --splits) SPLITS="$2"; shift 2;;
+    --data) DATA="$2"; shift 2;;
+    --preprocess) PREPROCESS=1; shift;;
+    --help|-h)
+      echo "Usage: $0 --dout EXP_DIR --splits SPLITS_JSON --data DATA_DIR [--preprocess]"
+      exit 0;;
+    *)
+      echo "[WARN] Unknown option: $1"; shift;;
+  esac
 done
 
-for i in {0..20};
-do CUDA_VISIBLE_DEVICES=3 python models/eval/eval_seq2seq.py   \
-	--model_path	exp/HeatObject/net_epoch_${i}.pth \
-	--eval_split	valid_unseen                          \
-	--model		models.model.seq2seq_im_mask        \
-	--data		data/json_feat_2.1.0                \
-	--gpu                                               \
-	--max_step	400                                 \
-	--max_fail	10                                  \
-	--num_threads	1 \
-	--subgoals HeatObject \
-	--skip_model_unroll_with_expert
+# ---------- 必要性检查 ----------
+if [[ -z "${DOUT}" || -z "${SPLITS}" || -z "${DATA}" ]]; then
+  echo "[FATAL] --dout / --splits / --data 都必须提供"
+  exit 1
+fi
+if [[ ! -f "$SPLITS" ]]; then
+  echo "[FATAL] splits 文件不存在: $SPLITS"
+  exit 1
+fi
+if [[ ! -d "$DATA" ]]; then
+  echo "[FATAL] data 目录不存在: $DATA"
+  exit 1
+fi
+
+# ---------- 环境 ----------
+export MCR_ROOT="${MCR_ROOT:-/content/mcr-agent}"
+export PYTHONPATH="$MCR_ROOT:$MCR_ROOT/Interactions:$PYTHONPATH"
+mkdir -p "$DOUT" "$MCR_ROOT/exp"
+ln -sfn "$DOUT" "$MCR_ROOT/exp/Interactions"
+
+cd "$MCR_ROOT/Interactions"
+echo "[INFO] MCR_ROOT=$MCR_ROOT"
+echo "[INFO] DOUT=$DOUT"
+echo "[INFO] SPLITS=$SPLITS"
+echo "[INFO] DATA=$DATA"
+echo "[INFO] CWD=$(pwd)"
+
+# ---------- 循环评估每个子目标和 epoch ----------
+subgoals=(CleanObject HeatObject CoolObject SliceObject ToggleObject PickupObject PutObject)
+
+for subgoal in "${subgoals[@]}"; do
+  echo "[INFO] Evaluating subgoal: $subgoal"
+  for i in $(seq 0 20); do
+    CKPT="$DOUT/${subgoal}/net_epoch_${i}.pth"
+    if [[ ! -f "$CKPT" ]]; then
+      echo "[SKIP] 不存在: $CKPT"
+      continue
+    fi
+
+    echo "[RUN] epoch $i -> $CKPT"
+    CUDA_VISIBLE_DEVICES=3 python models/eval/eval_seq2seq.py \
+      --model_path "$CKPT" \
+      --eval_split valid_unseen \
+      --model Interactions.models.model.seq2seq_im_mask_sub \
+      --data "$DATA" \
+      --splits "$SPLITS" \
+      --gpu \
+      --num_threads 1 \
+      --max_steps 400 \
+      --max_fails 10 \
+      --subgoals "$subgoal" \
+      --skip_model_unroll_with_expert \
+      $( [[ "$PREPROCESS" -eq 1 ]] && echo "--preprocess" )
+  done
 done
-
-for i in {0..20};
-do CUDA_VISIBLE_DEVICES=3 python models/eval/eval_seq2seq.py   \
-	--model_path	exp/CoolObject/net_epoch_${i}.pth \
-	--eval_split	valid_unseen                          \
-	--model		models.model.seq2seq_im_mask        \
-	--data		data/json_feat_2.1.0                \
-	--gpu                                               \
-	--max_step	400                                 \
-	--max_fail	10                                  \
-	--num_threads	1 \
-	--subgoals CoolObject \
-	--skip_model_unroll_with_expert
-done
-
-for i in {0..20};
-do CUDA_VISIBLE_DEVICES=3 python models/eval/eval_seq2seq.py   \
-	--model_path	exp/SliceObject/net_epoch_${i}.pth \
-	--eval_split	valid_unseen                          \
-	--model		models.model.seq2seq_im_mask        \
-	--data		data/json_feat_2.1.0                \
-	--gpu                                               \
-	--max_step	400                                 \
-	--max_fail	10                                  \
-	--num_threads	1 \
-	--subgoals SliceObject \
-	--skip_model_unroll_with_expert
-done
-
-for i in {0..20};
-do CUDA_VISIBLE_DEVICES=3 python models/eval/eval_seq2seq.py   \
-	--model_path	exp/ToggleObject/net_epoch_${i}.pth \
-	--eval_split	valid_unseen                          \
-	--model		models.model.seq2seq_im_mask        \
-	--data		data/json_feat_2.1.0                \
-	--gpu                                               \
-	--max_step	400                                 \
-	--max_fail	10                                  \
-	--num_threads	1 \
-	--subgoals ToggleObject \
-	--skip_model_unroll_with_expert
-done
-
-for i in {0..20};
-do CUDA_VISIBLE_DEVICES=3 python models/eval/eval_seq2seq.py   \
-	--model_path	exp/PickupObject/net_epoch_${i}.pth \
-	--eval_split	valid_unseen                          \
-	--model		models.model.seq2seq_im_mask        \
-	--data		data/json_feat_2.1.0                \
-	--gpu                                               \
-	--max_step	400                                 \
-	--max_fail	10                                  \
-	--num_threads	1 \
-	--subgoals PickupObject \
-	--skip_model_unroll_with_expert
-done
-
-for i in {0..20};
-do CUDA_VISIBLE_DEVICES=3 python models/eval/eval_seq2seq.py   \
-	--model_path	exp/PutObject/net_epoch_${i}.pth \
-	--eval_split	valid_unseen                          \
-	--model		models.model.seq2seq_im_mask        \
-	--data		data/json_feat_2.1.0                \
-	--gpu                                               \
-	--max_step	400                                 \
-	--max_fail	10                                  \
-	--num_threads	1 \
-	--subgoals PutObject \
-	--skip_model_unroll_with_expert
-done
-
-

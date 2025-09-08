@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ========= default =========
-MCR_ROOT=${MCR_ROOT:-$(pwd)/Interactions}
+MCR_ROOT=${MCR_ROOT:-$(pwd)}
 DRIVE_ROOT=${DRIVE_ROOT:-/content/drive/MyDrive}
 DATA_DEFAULT_JSON=${DRIVE_ROOT}/data/json_feat_2.1.0
 SPLITS_DEFAULT_JSON=${DRIVE_ROOT}/data/splits/oct21.json
@@ -14,7 +14,7 @@ SPLITS="$SPLITS_DEFAULT_JSON"
 PREPROCESS=0
 PP_FOLDER=pp
 SAVE_EVERY_EPOCH=1
-MODEL=seq2seq_im_mask
+MODEL=Interactions.models.model.seq2seq_im_mask_sub
 GPU=1
 DOUT="${MCR_ROOT}/exp"
 RESUME=""
@@ -119,15 +119,16 @@ fi
 
 # ========= environment setup =========
 export MCR_ROOT="$MCR_ROOT"
+export PYTHONPATH="${MCR_ROOT}:${MCR_ROOT}/Interactions:${PYTHONPATH}"
 mkdir -p "$DOUT"
-cd "$MCR_ROOT"
+cd "$MCR_ROOT/Interactions"
 
 # Create symbolic links
-ln -sfn ../env .
-ln -sfn ../gen .
-ln -sfn ../exp .
-ln -sfn ../data .
-ln -sfn ../autoaugment.py .
+#ln -sfn ../env .
+#ln -sfn ../gen .
+#ln -sfn ../exp .
+#ln -sfn ../data .
+#ln -sfn ../autoaugment.py .
 
 # ========= training interaction policies =========
 subgoals=(CleanObject HeatObject CoolObject SliceObject ToggleObject PickupObject PutObject)
