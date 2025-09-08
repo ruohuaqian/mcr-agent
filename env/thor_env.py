@@ -24,19 +24,6 @@ DEFAULT_DISPLAY = ":99"
 
 def _log(msg): print(f"[ThorEnv] {msg}")
 
-def _ensure_env_flags():
-    # Completely disable Vulkan, force OpenGL software rendering
-    for k in ["AI2THOR_PLATFORM","AI2THOR_COMMIT_ID","AI2THOR_BRANCH","AI2THOR_LOCAL_BUILD","VK_ICD_FILENAMES"]:
-        os.environ.pop(k, None)
-    os.environ.setdefault("AI2THOR_USE_VULKAN","0")
-    os.environ["UNITY_DISABLE_VULKAN"]="1"
-    os.environ["UNITY_FORCE_OPENGL"]="1"
-    os.environ["LIBGL_ALWAYS_SOFTWARE"]="1"
-    os.environ["GALLIUM_DRIVER"]="llvmpipe"
-    os.environ.setdefault("MESA_GL_VERSION_OVERRIDE","3.3")
-    os.environ.setdefault("SDL_VIDEODRIVER","x11")
-    os.environ.setdefault("XDG_RUNTIME_DIR","/tmp")
-
 def _x_alive(display: str) -> bool:
     env = os.environ.copy(); env["DISPLAY"]=display
     try:
@@ -64,8 +51,6 @@ class ThorEnv(Controller):
         rendering_engine: str = "OpenGL",   # Explicit declaration
         headless: bool = True,              # Key: True
     ):
-        _ensure_env_flags()
-
         if use_virtual_display:
             # Do not start Xvfb here; only reuse existing :99 (main process handles startup)
             os.environ["DISPLAY"] = x_display
@@ -176,29 +161,60 @@ class ThorEnv(Controller):
         task_type = traj['task_type']
         self.task = get_task(task_type, traj, self, args, reward_type=reward_type, max_episode_length=max_episode_length)
 
-    def step(self, action, smooth_nav=False):
-        '''
-        overrides ai2thor.controller.Controller.step() for smooth navigation and goal_condition updates
-        '''
-        if smooth_nav:
-            if "MoveAhead" in action['action']:
-                self.smooth_move_ahead(action)
-            elif "Rotate" in action['action']:
-                self.smooth_rotate(action)
-            elif "Look" in action['action']:
-                self.smooth_look(action)
-            else:
-                super().step(action)
+    def step(self, action=None, smooth_nav=False, **kwargs):
+        """
+        兼容：
+          - step("RotateLeft", rotation=90)
+          - step({"action": "RotateLeft", "rotation": 90})
+        并仅对我们关心的导航/俯仰做平滑或别名处理；其余一律透传 super().
+        """
+        # 统一解析成 (act: str|None, params: dict)
+        if isinstance(action, dict):
+            act = action.get("action")
+            params = {k: v for k, v in action.items() if k != "action"}
         else:
-            if "LookUp" in action['action']:
-                self.look_angle(-constants.AGENT_HORIZON_ADJ)
-            elif "LookDown" in action['action']:
-                self.look_angle(constants.AGENT_HORIZON_ADJ)
-            else:
-                super().step(action)
+            act = action  # str 或 None（AI2-THOR 某些内部调用可能给 None）
+            params = dict(kwargs)
 
-        event = self.update_states(action)
-        self.check_post_conditions(action)
+        # 对于初始化/内部查询（如 "GetScenesInBuild"）或 act 为 None：直接透传
+        if not isinstance(act, str):
+            event = super().step(action=act, **params)
+            # 尽量不在这类内部调用上更新你自己的状态机
+            return event
+
+        # ---------- 平滑导航分支 ----------
+        if smooth_nav:
+            # 这里沿用你现有的 smooth_*，它们一般期望 dict 形式的输入
+            alias = {"action": act, **params}
+            if "MoveAhead" in act:
+                event = self.smooth_move_ahead(alias)
+            elif "Rotate" in act:
+                event = self.smooth_rotate(alias)
+            elif "Look" in act:
+                event = self.smooth_look(alias)
+            else:
+                # 非导航类动作，直接透传
+                event = super().step(action=act, **params)
+        else:
+            # ---------- 非平滑分支：特殊处理 LookUp/LookDown，其余透传 ----------
+            if act == "LookUp":
+                self.look_angle(-constants.AGENT_HORIZON_ADJ)
+                event = self.last_event  # look_angle 内部会 step；没有就回退 last_event
+            elif act == "LookDown":
+                self.look_angle(constants.AGENT_HORIZON_ADJ)
+                event = self.last_event
+            else:
+                event = super().step(action=act, **params)
+
+        # 统一给你自己的状态更新传递“dict 规格”的动作描述
+        try:
+            act_dict = {"action": act, **params}
+            event = self.update_states(act_dict)
+            self.check_post_conditions(act_dict)
+        except Exception:
+            # 状态更新失败不应影响环境前进；必要时可打印日志
+            pass
+
         return event
 
     def check_post_conditions(self, action):
