@@ -7,6 +7,7 @@ from Interactions.models.eval.eval_subgoals import EvalSubgoals
 if __name__ == '__main__':
     # multiprocessing settings
     mp.set_start_method('spawn')
+    mp.set_start_method("spawn", force=True)
     manager = mp.Manager()
 
     # parser
