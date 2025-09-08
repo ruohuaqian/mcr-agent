@@ -271,13 +271,14 @@ class Module(nn.Module):
 
     @classmethod
     def load(cls, fsave, fargs=None):
-        '''
-        load pth model from disk
-        '''
         save = torch.load(fsave)
-        model = cls(fargs, save['vocab'])
+        vocab = save['vocab']
+        args_to_use = fargs or save['args']
+        if args_to_use is None:
+            raise RuntimeError("Need fargs or checkpoint['args']")
+        model = cls(args_to_use, vocab)
         model.load_state_dict(save['model'])
-        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(model.parameters(), lr=getattr(args_to_use, "lr", 1e-3))
         return model, optimizer
 
     @classmethod
