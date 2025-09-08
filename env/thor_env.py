@@ -79,14 +79,18 @@ class ThorEnv(Controller):
             super().stop()
         finally:
             _log("stopped.")
-    def reset(self, scene_name_or_num,
-              grid_size=constants.AGENT_STEP_SIZE / constants.RECORD_SMOOTHING_FACTOR,
-              camera_y=constants.CAMERA_HEIGHT_OFFSET,
-              render_image=constants.RENDER_IMAGE,
-              render_depth_image=constants.RENDER_DEPTH_IMAGE,
-              render_class_image=constants.RENDER_CLASS_IMAGE,
-              render_object_image=constants.RENDER_OBJECT_IMAGE,
-              visibility_distance=constants.VISIBILITY_DISTANCE):
+
+    def reset(
+            self,
+            scene_name_or_num,
+            grid_size=constants.AGENT_STEP_SIZE / constants.RECORD_SMOOTHING_FACTOR,
+            camera_y=constants.CAMERA_HEIGHT_OFFSET,
+            render_image=constants.RENDER_IMAGE,
+            render_depth_image=constants.RENDER_DEPTH_IMAGE,
+            render_class_image=constants.RENDER_CLASS_IMAGE,
+            render_object_image=constants.RENDER_OBJECT_IMAGE,
+            visibility_distance=constants.VISIBILITY_DISTANCE
+    ):
         '''
         reset scene and task states
         '''
@@ -98,18 +102,26 @@ class ThorEnv(Controller):
             scene_name = 'FloorPlan%d' % scene_name_or_num
 
         super().reset(scene_name)
-        event = super().step(dict(
-            action='Initialize',
+        event = super().step(
+            action="Initialize",
             gridSize=grid_size,
             cameraY=camera_y,
             renderImage=render_image,
             renderDepthImage=render_depth_image,
+            # 下面两项在 AI2-THOR 4.x 更推荐：
+            # renderSemanticSegmentation=render_class_image,
+            # renderInstanceSegmentation=render_object_image,
+            # 如果你仍在用旧键也可，但别混用
+
             renderClassImage=render_class_image,
             renderObjectImage=render_object_image,
-            visibility_distance=visibility_distance,
+            visibilityDistance=visibility_distance,  # ← 注意驼峰
             makeAgentsVisible=False,
-        ))
-
+        )
+        if not event.metadata.get("lastActionSuccess", True):
+            raise RuntimeError(
+                f"Initialize failed: {event.metadata.get('errorMessage', '')}"
+            )
         # reset task if specified
         if self.task is not None:
             self.task.reset()
