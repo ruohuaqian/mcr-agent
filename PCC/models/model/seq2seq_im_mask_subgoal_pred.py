@@ -2,18 +2,18 @@ import os
 import cv2
 import torch
 import numpy as np
-import models.nn.vnn as vnn
+import PCC.models.nn.vnn as vnn
 import collections
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
-from models.model.seq2seq_subgoal_pred import Module as Base
-from models.utils.metric import compute_f1, compute_exact
+from PCC.models.model.seq2seq_subgoal_pred import Module as Base
+from PCC.models.utils.metric import compute_f1, compute_exact
 from gen.utils.image_util import decompress_mask
 
 from PIL import Image
 
-from models.model import constants
+from PCC.models.model import constants
 classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp', 'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
 
 from models.nn.resnet import Resnet

@@ -8,9 +8,9 @@ import numpy as np
 from torch import nn
 from tensorboardX import SummaryWriter
 from tqdm import trange
-from Interactions.models.model  import constants
+from models.model import constants
 classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp', 'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
-
+import torch.nn.functional as F
 
 class Module(nn.Module):
 
@@ -30,9 +30,11 @@ class Module(nn.Module):
 
         # emb modules
         self.emb_word = nn.Embedding(len(vocab['word']), args.demb)
-        # self.emb_word = nn.Embedding(len(vocab['word']), args.demb)
+
         self.emb_action_low = nn.Embedding(len(vocab['action_low']), args.demb)
-        self.emb_objnav = nn.Embedding(len(vocab['objnav']), args.demb)
+
+        self.emb_action_high = nn.Embedding(len(vocab['action_high']), args.demb)
+
 
         # end tokens
         self.stop_token = self.vocab['action_low'].word2index("<<stop>>", train=False)
@@ -58,8 +60,6 @@ class Module(nn.Module):
         valid_unseen = splits['valid_unseen']
 
         train = [(s, False) for s in train_list]
-        train = train + [(s, 1) for s in train_list] + [(s, 2) for s in train_list]
-        train = train + [(s, 3) for s in train_list] + [(s, 4) for s in train_list] + [(s, 5) for s in train_list] + [(s, 6) for s in train_list]
         valid_seen = [(s, False) for s in valid_seen]
         valid_unseen = [(s, False) for s in valid_unseen]
 
@@ -98,17 +98,11 @@ class Module(nn.Module):
             self.adjust_lr(optimizer, args.lr, epoch, decay_epoch=args.decay_epoch)
             total_train_loss = list()
             random.shuffle(train) # shuffle every epoch
-            c_st=0
+            
             for batch, feat in self.iterate(train, args.batch):
-                c_st+=1
-                if len(feat['sub_objs']) == 0 :
-                    continue
 
                 out = self.forward(feat)
-                preds = self.extract_preds(out, batch, feat)
-                # p_train.update(preds)
                 loss = self.compute_loss(out, batch, feat)
-                # print(loss.keys())
                 for k, v in loss.items():
                     ln = 'loss_' + k
                     m_train[ln].append(v.item())
@@ -124,22 +118,8 @@ class Module(nn.Module):
                 sum_loss = sum_loss.detach().cpu()
                 total_train_loss.append(float(sum_loss))
                 train_iter += self.args.batch
-
-                if not (c_st % 2628):
-
-                    fsave = os.path.join(args.dout, f'net_epoch_{epoch}_{c_st}.pth')
-
-                    torch.save({
-                        'metric': {'epoch': epoch, 'c_st':c_st}, #stats,
-                        'model': self.state_dict(),
-                        'optim': optimizer.state_dict(),
-                        'args': self.args,
-                        'vocab': self.vocab,
-                    }, fsave)
-
-
+            
             stats = {'epoch': epoch,}
-                  
 
             # save the latest checkpoint
             if args.save_every_epoch:
@@ -147,7 +127,7 @@ class Module(nn.Module):
             else:
                 fsave = os.path.join(args.dout, 'latest.pth')
             torch.save({
-                'metric': {'epoch': epoch}, #stats,
+                'metric': stats, #stats,
                 'model': self.state_dict(),
                 'optim': optimizer.state_dict(),
                 'args': self.args,
@@ -166,28 +146,30 @@ class Module(nn.Module):
         validation loop
         '''
         args = args or self.args
-        m_dev = collections.defaultdict(list)
-        p_dev = {}
         self.eval()
-        total_loss = list()
+        total_correct = 0
+        total_num = 0
+        total_loss = 0
         dev_iter = iter
         for batch, feat in self.iterate(dev, args.batch):
             out = self.forward(feat)
-            preds = self.extract_preds(out, batch, feat)
-            p_dev.update(preds)
-            loss = self.compute_loss(out, batch, feat)
-            for k, v in loss.items():
-                ln = 'loss_' + k
-                m_dev[ln].append(v.item())
-                self.summary_writer.add_scalar("%s/%s" % (name, ln), v.item(), dev_iter)
-            sum_loss = sum(loss.values())
-            self.summary_writer.add_scalar("%s/loss" % (name), sum_loss, dev_iter)
-            total_loss.append(float(sum_loss.detach().cpu()))
-            dev_iter += len(batch)
+            # print(out['out_obj'].shape)
+            preds = F.softmax(out['out_obj'])
+            preds = torch.argmax(preds, dim=1)
 
-        m_dev = {k: sum(v) / len(v) for k, v in m_dev.items()}
-        total_loss = sum(total_loss) / len(total_loss)
-        return p_dev, dev_iter, total_loss, m_dev
+            total_num += len(preds)
+
+            correct = (preds == feat['objnav'].cuda()).sum()
+            total_correct+=correct
+
+            loss = self.compute_loss(out, batch, feat)
+            total_loss+=loss['objnav']
+            del(batch)
+            del(feat)
+
+        accuracy = total_correct / total_num
+        final_loss = total_loss / total_num
+        return accuracy, final_loss
 
     def featurize(self, batch):
         raise NotImplementedError()
@@ -246,15 +228,10 @@ class Module(nn.Module):
         '''
         error_no=0
         for i in trange(0, len(data), batch_size, desc='batch'):
-            try:
-                tasks = data[i:i+batch_size]
-                batch = [(self.load_task_json(task), swapColor) for task, swapColor in tasks]
-                feat = self.featurize(batch)
-                yield batch, feat
-            except:
-                print("no. of wrong trajs", error_no+1)
-                error_no+=1
-                continue
+            tasks = data[i:i+batch_size]
+            batch = [(self.load_task_json(task), swapColor) for task, swapColor in tasks]
+            feat = self.featurize(batch)
+            yield batch, feat
 
     def zero_input(self, x, keep_end_token=True):
         '''
