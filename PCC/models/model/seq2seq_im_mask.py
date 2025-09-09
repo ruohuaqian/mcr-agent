@@ -2,7 +2,7 @@ import os
 import cv2
 import torch
 import numpy as np
-import models.nn.vnn as vnn
+import PCC.models.nn.vnn as vnn
 import collections
 from torch import nn
 from torch.nn import functional as F
@@ -13,10 +13,10 @@ from gen.utils.image_util import decompress_mask
 
 from PIL import Image
 
-from gen  import constants
+from PCC.models.model  import constants
 classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp', 'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
 
-from nn.resnet import Resnet
+from PCC.models.nn.resnet import Resnet
 
 class SelfAttn(nn.Module):
     '''
