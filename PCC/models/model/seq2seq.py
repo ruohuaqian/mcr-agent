@@ -207,10 +207,16 @@ class Module(nn.Module):
         '''
         load preprocessed json from disk
         '''
-        json_path = os.path.join(self.args.data, task['task'], '%s' % self.args.pp_folder, 'ann_%d.json' % task['repeat_idx'])
-        with open(json_path) as f:
-            data = json.load(f)
-        return data
+        json_path = os.path.join(self.args.data, task['task'], '%s' % self.args.pp_folder,
+                                 'ann_%d.json' % task['repeat_idx'])
+        try:
+            with open(json_path, 'r') as f:
+                data = json.load(f)
+            return data
+        except Exception as e:
+            print(f"ERROR loading JSON from {json_path}")
+            raise
+
 
     def get_task_root(self, ex):
         '''
