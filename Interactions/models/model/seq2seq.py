@@ -251,9 +251,9 @@ class Module(nn.Module):
                 batch = [(self.load_task_json(task), swapColor) for task, swapColor in tasks]
                 feat = self.featurize(batch)
                 yield batch, feat
-            except:
-                print("no. of wrong trajs", error_no+1)
-                error_no+=1
+            except Exception as e:
+                error_no += 1
+                print(f"no. {error_no} of wrong trajs, {e}")
                 continue
 
     def zero_input(self, x, keep_end_token=True):
