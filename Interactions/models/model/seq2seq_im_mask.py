@@ -388,7 +388,7 @@ class Module(Base):
 
         # Download and load the correct .pt feature file based on swapColor
         if not swapColor:
-            pt_filename = f"train/{task_path_part}/feat.pt"
+            pt_filename = f"train/{task_path_part}/{self.feat_pt}"
         elif swapColor in [1, 2]:
             pt_filename = f"train/{task_path_part}/feat_conv_colorSwap{swapColor}_panoramic.pt"
         elif swapColor in [3, 4, 5, 6]:
@@ -444,8 +444,8 @@ class Module(Base):
 
         subgoal_lang = np.array(lang_instr_sep)[sub_indices]
 
-        alow = [];
-        alow_manip = [];
+        alow = []
+        alow_manip = []
         obj_high_indices = []
         for ia, a in enumerate(ex['num']['action_low']):
             if val_action_high[ia] == 1 and a['action'] in self.vocab['action_low'].word2index(
