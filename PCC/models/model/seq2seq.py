@@ -96,7 +96,6 @@ class Module(nn.Module):
             random.shuffle(train) # shuffle every epoch
             
             for batch, feat in self.iterate(train, args.batch):
-            
 
                 out = self.forward(feat)
                 loss = self.compute_loss(out, batch, feat)
@@ -138,6 +137,122 @@ class Module(nn.Module):
                         self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
             pprint.pprint(stats)
 
+    def run_train_stream(self, splits, args=None, optimizer=None):
+        '''
+        training loop with streaming data loading
+        '''
+        # args
+        args = args or self.args
+
+        # splits
+        train_list = splits['train']
+        valid_seen = splits['valid_seen']
+        valid_unseen = splits['valid_unseen']
+
+        # 创建流式数据集
+        train_stream = ALFREDStreamingDataset(
+            repo_id=self.args.huggingface_id,
+            task_list=[{'task': s, 'repeat_idx': 0} for s in train_list],
+            feat_pt=self.feat_pt,
+            args=self.args
+        )
+
+        valid_seen_stream = ALFREDStreamingDataset(
+            repo_id=self.args.huggingface_id,
+            task_list=[{'task': s, 'repeat_idx': 0} for s in valid_seen],
+            feat_pt=self.feat_pt,
+            args=self.args
+        )
+
+        valid_unseen_stream = ALFREDStreamingDataset(
+            repo_id=self.args.huggingface_id,
+            task_list=[{'task': s, 'repeat_idx': 0} for s in valid_unseen],
+            feat_pt=self.feat_pt,
+            args=self.args
+        )
+
+        # 调试模式：使用小数据集
+        if self.args.dataset_fraction > 0:
+            # 对于流式数据，我们需要在迭代时进行限制
+            train_size = int(len(train_list) * self.args.dataset_fraction * 0.7)
+            valid_size = int(len(valid_seen) * (self.args.dataset_fraction * 0.3) / 2)
+
+            def limited_stream(stream, limit):
+                count = 0
+                for item in stream:
+                    if count >= limit:
+                        break
+                    yield item
+                    count += 1
+
+            train_stream = limited_stream(train_stream, train_size)
+            valid_seen_stream = limited_stream(valid_seen_stream, valid_size)
+            valid_unseen_stream = limited_stream(valid_unseen_stream, valid_size)
+
+        # 初始化 tensorboard
+        self.summary_writer = SummaryWriter(log_dir=args.dout)
+
+        # 保存配置
+        fconfig = os.path.join(args.dout, 'config.json')
+        with open(fconfig, 'wt') as f:
+            json.dump(vars(args), f, indent=2)
+
+        # 优化器
+        optimizer = optimizer or torch.optim.Adam(self.parameters(), lr=args.lr)
+
+        print("Saving to: %s" % self.args.dout)
+        best_loss = {'train': 1e10, 'valid_seen': 1e10, 'valid_unseen': 1e10}
+        train_iter, valid_seen_iter, valid_unseen_iter = 0, 0, 0
+
+        for epoch in trange(0, args.epoch, desc='epoch'):
+            m_train = collections.defaultdict(list)
+            self.train()
+            self.adjust_lr(optimizer, args.lr, epoch, decay_epoch=args.decay_epoch)
+            total_train_loss = list()
+
+            # 使用流式迭代器
+            for batch_idx, batch in enumerate(self.streaming_iterate(train_stream, args.batch)):
+                feat = self.streaming_featurize(batch)
+
+                out = self.forward(feat)
+                loss = self.compute_loss(out, batch, feat)
+
+                for k, v in loss.items():
+                    ln = 'loss_' + k
+                    m_train[ln].append(v.item())
+                    self.summary_writer.add_scalar('train/' + ln, v.item(), train_iter)
+
+                # 优化器反向传播
+                optimizer.zero_grad()
+                sum_loss = sum(loss.values())
+                sum_loss.backward()
+                optimizer.step()
+
+                self.summary_writer.add_scalar('train/loss', sum_loss, train_iter)
+                sum_loss = sum_loss.detach().cpu()
+                total_train_loss.append(float(sum_loss))
+                train_iter += len(batch)
+
+                # 每 N 个batch进行验证
+                if batch_idx % args.validation_interval == 0:
+                    self.validate(valid_seen_stream, valid_unseen_stream, train_iter)
+
+            # 保存检查点
+            stats = {'epoch': epoch}
+            if args.save_every_epoch:
+                fsave = os.path.join(args.dout, 'net_epoch_%d.pth' % epoch)
+            else:
+                fsave = os.path.join(args.dout, 'latest.pth')
+
+            torch.save({
+                'metric': stats,
+                'model': self.state_dict(),
+                'optim': optimizer.state_dict(),
+                'args': self.args,
+                'vocab': self.vocab,
+            }, fsave)
+
+            pprint.pprint(stats)
     def run_pred(self, dev, args=None, name='dev', iter=0):
         '''
         validation loop
@@ -295,6 +410,88 @@ class Module(nn.Module):
             #     print("no. of wrong trajs", error_no+1)
             #     error_no+=1
             #     continue
+
+    def streaming_iterate(self, data_stream, batch_size):
+        '''
+        流式批处理生成器
+        '''
+        current_batch = []
+        for data_item in data_stream:
+            current_batch.append(data_item)
+
+            if len(current_batch) >= batch_size:
+                yield current_batch
+                current_batch = []
+
+        # 处理最后不足一个batch的数据
+        if current_batch:
+            yield current_batch
+
+    def validate(self, valid_seen_stream, valid_unseen_stream, global_step):
+        '''
+        流式验证函数
+        '''
+        self.eval()
+
+        with torch.no_grad():
+            # 验证 seen
+            valid_seen_loss = []
+            for batch in self.streaming_iterate(valid_seen_stream, self.args.batch):
+                feat = self.streaming_featurize(batch)
+                out = self.forward(feat)
+                loss = self.compute_loss(out, batch, feat)
+                valid_seen_loss.append(sum(loss.values()).item())
+
+            # 验证 unseen
+            valid_unseen_loss = []
+            for batch in self.streaming_iterate(valid_unseen_stream, self.args.batch):
+                feat = self.streaming_featurize(batch)
+                out = self.forward(feat)
+                loss = self.compute_loss(out, batch, feat)
+                valid_unseen_loss.append(sum(loss.values()).item())
+
+        # 记录验证结果
+        avg_seen_loss = sum(valid_seen_loss) / len(valid_seen_loss) if valid_seen_loss else 0
+        avg_unseen_loss = sum(valid_unseen_loss) / len(valid_unseen_loss) if valid_unseen_loss else 0
+
+        self.summary_writer.add_scalar('valid/seen_loss', avg_seen_loss, global_step)
+        self.summary_writer.add_scalar('valid/unseen_loss', avg_unseen_loss, global_step)
+
+        self.train()
+
+    def get_task_list_from_hf(self):
+        '''
+        从 Hugging Face 数据集获取任务列表
+        '''
+        from datasets import load_dataset
+
+        # 加载数据集元数据
+        dataset = load_dataset(
+            self.args.huggingface_id,
+            streaming=True,
+            repo_type="dataset"
+        )
+
+        # 获取所有任务路径
+        task_list = []
+        for split in ['train', 'valid_seen', 'valid_unseen']:
+            if split in dataset:
+                for example in dataset[split]:
+                    task_list.append({
+                        'task': example['task'],
+                        'repeat_idx': example.get('repeat_idx', 0)
+                    })
+
+        return task_list
+
+    def cleanup_streaming_resources(self):
+        '''
+        清理流式加载的临时资源
+        '''
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def zero_input(self, x, keep_end_token=True):
         '''

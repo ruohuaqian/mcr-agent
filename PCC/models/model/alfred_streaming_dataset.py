@@ -1,0 +1,63 @@
+from datasets import IterableDataset
+from huggingface_hub import HfApi
+import requests
+import io
+import torch
+import json
+
+
+class ALFREDStreamingDataset:
+    def __init__(self, repo_id, task_list, feat_pt, args):
+        self.repo_id = repo_id
+        self.task_list = task_list
+        self.feat_pt = feat_pt
+        self.args = args
+        self.api = HfApi()
+
+    def __iter__(self):
+        for task_info in self.task_list:
+            task_path = task_info['task']
+            repeat_idx = task_info['repeat_idx']
+
+            # 为每个 swapColor 变体生成样本
+            for swapColor in range(7):
+                try:
+                    # 流式加载 JSON
+                    json_url = self.api.hf_hub_url(
+                        repo_id=self.repo_id,
+                        filename=f"{task_path}/pp/ann_{repeat_idx}.json",
+                        repo_type="dataset"
+                    )
+
+                    json_response = requests.get(json_url)
+                    ex = json.loads(json_response.content.decode('utf-8'))
+
+                    # 流式加载 PT 文件
+                    if swapColor == 0:
+                        pt_filename = f"train/{task_path}/{self.feat_pt}"
+                    elif swapColor in [1, 2]:
+                        pt_filename = f"train/{task_path}/feat_conv_colorSwap{swapColor}_panoramic.pt"
+                    else:
+                        pt_filename = f"train/{task_path}/feat_conv_onlyAutoAug{swapColor - 2}_panoramic.pt"
+
+                    pt_url = self.api.hf_hub_url(
+                        repo_id=self.repo_id,
+                        filename=pt_filename,
+                        repo_type="dataset"
+                    )
+
+                    pt_response = requests.get(pt_url)
+                    with io.BytesIO(pt_response.content) as buffer:
+                        im = torch.load(buffer, map_location='cpu')
+
+                    yield {
+                        'ex': ex,
+                        'im': im,
+                        'task_path': task_path,
+                        'repeat_idx': repeat_idx,
+                        'swapColor': swapColor
+                    }
+
+                except Exception as e:
+                    print(f"Error loading {task_path}, repeat {repeat_idx}, swap {swapColor}: {e}")
+                    continue

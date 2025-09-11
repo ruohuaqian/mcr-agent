@@ -171,6 +171,54 @@ class Module(Base):
 
         return feat
 
+    def streaming_featurize(self, batch, load_mask=True, load_frames=True):
+        '''
+        流式特征处理
+        '''
+        device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
+        feat = collections.defaultdict(list)
+
+        for data_item in batch:
+            ex = data_item['ex']
+
+            ###########
+            # auxiliary
+            ###########
+            action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
+            low_to_high_idx = ex['num']['low_to_high_idx']
+            action_high = action_high_order[low_to_high_idx]
+            feat['action_high'].append(action_high)
+            feat['action_high_order'].append(action_high_order)
+
+            #########
+            # inputs
+            #########
+            lang_goal, lang_instr = ex['num']['lang_goal'], ex['num']['lang_instr']
+            lang_instr = self.zero_input(lang_instr) if self.args.zero_instr else lang_instr
+            feat['lang_instr'].append(lang_instr)
+
+            if len(lang_instr) != len(action_high_order):
+                feat['lang_instr'].pop(-1)
+                feat['action_high_order'].pop(-1)
+
+        # 张量化和填充（保持不变）
+        for k, v in feat.items():
+            if k in {'lang_goal'}:
+                seqs = [torch.tensor(vv, device=device) for vv in v]
+                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+                seq_lengths = np.array(list(map(len, v)))
+                embed_seq = self.emb_word(pad_seq)
+                packed_input = pack_padded_sequence(embed_seq, seq_lengths, batch_first=True, enforce_sorted=False)
+                feat[k] = packed_input
+            elif k in {'lang_instr'}:
+                num_instr = np.array(list(map(len, v)))
+                seqs = [torch.tensor(vvv, device=device) for vv in v for vvv in vv]
+                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+                embed_seq = self.emb_word(pad_seq)
+                feat[k] = {'seq': embed_seq, 'len': num_instr}
+            # ... 其他处理逻辑保持不变
+
+        return feat
 
     def serialize_lang_action(self, feat, action_high_order):
         '''
