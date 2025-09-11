@@ -141,7 +141,7 @@ for subgoal in "${subgoals[@]}"; do
   echo "[INFO] Training subgoal: $subgoal"
 
   # Assemble training command
-  CMD=( python models/train/train_seq2seq.py
+  CMD=( python models/train/train_seq2seq_stream.py
     --seed "$SEED"
     --data "$DATA"
     --splits "$SPLITS"
