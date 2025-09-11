@@ -117,15 +117,12 @@ class Module(nn.Module):
             if self.args.fast_epoch:
                 train_stream = train_stream.take(args.batch * 10)
 
-            # Prepare partial functions
-            p_preprocess_function = partial(self.preprocess_function, args=args)
+            p_preprocess_function = self.preprocess_function
             p_collate_fn = partial(self.collate_fn, device=device)
-
             # Apply processing and shuffling
-            processed_train_stream = train_stream.map(p_preprocess_function)
-            processed_train_stream = processed_train_stream.shuffle(buffer_size=1000, seed=args.seed)
 
-            # Create the final DataLoader
+            processed_train_stream = train_stream.map(p_preprocess_function)
+            # ...
             train_loader = DataLoader(
                 processed_train_stream,
                 batch_size=args.batch,
