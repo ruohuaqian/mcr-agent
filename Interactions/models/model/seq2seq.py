@@ -118,12 +118,8 @@ class Module(nn.Module):
             )
             # dual problem of featurize
             device = torch.device('cuda') if args.gpu else torch.device('cpu')
-            model.to(device)
             # param sure?
-            p_collate_fn = partial(collate_fn,
-                                   vocab=vocab,
-                                   model=model,
-                                   device=device)
+            p_collate_fn = partial(collate_fn, vocab=vocab)
 
             augmented_train_stream = train_stream.flat_map(augment_with_swap_color)
             processed_train_stream = augmented_train_stream.map(p_preprocess_function)

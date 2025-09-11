@@ -599,7 +599,7 @@ class Module(Base):
 
 
 
-    def collate_fn(self, list_of_examples , device):
+    def collate_fn(self, list_of_examples):
         device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
         feat = collections.defaultdict(list)
         for example in list_of_examples:
