@@ -337,7 +337,31 @@ class Module(Base):
                     
                     in_idx += l
                 feat[k] = {'seq': fin_seq}
-            
+            if k == 'sub_lang':
+                segs = []
+                for item in v:
+                    t = torch.as_tensor(item, dtype=torch.long, device=device)
+                    if t.dim() == 1:
+                        segs.append(t)
+                    elif t.dim() == 2:
+                        # (num_seg, L) -> 拆成 num_seg 个 1D
+                        segs.extend([row for row in t])
+                    else:
+                        # 也支持 list[list[int]] 的情况（上面的 as_tensor 会直接得到 2D）
+                        raise ValueError(f"sub_lang unexpected ndim: {tuple(t.shape)}")
+                if len(segs) == 0:
+                    # 空批兜底：给一个最小结构，防止后续访问
+                    feat[k] = {'seqs': [], 'emb': torch.empty(0, 0, self.emb_word.weight.size(1), device=device),
+                               'pi': None, 'seq_len': torch.as_tensor([], dtype=torch.long)}
+                    continue
+
+                pad_seq = pad_sequence(segs, batch_first=True, padding_value=int(self.pad))  # (sum_seg, Lmax)
+                seq_lengths = torch.as_tensor([len(x) for x in segs], dtype=torch.long)
+                emb = self.emb_word(pad_seq)  # (sum_seg, Lmax, E)
+                pi = pack_padded_sequence(emb, seq_lengths.cpu(), batch_first=True, enforce_sorted=False)
+                feat[k] = {'seqs': segs, 'emb': emb, 'pi': pi, 'seq_len': seq_lengths}
+                continue
+
             elif k in {'action_low_mask'}:
                 # mask padding
                 seqs = [torch.tensor(vv, device=device, dtype=torch.float) for vv in v]
