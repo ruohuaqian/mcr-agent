@@ -434,15 +434,15 @@ class Module(Base):
         lang_instr_sep = self.zero_input(lang_instr_sep) if self.args.zero_instr else lang_instr_sep
         processed_data['lang_goal'] = lang_goal
 
-        sub_indices = (
-        np.array(action_high_order == self.vocab['action_high'].word2index(subgoal_analysis)).astype(int).nonzero()[0])
+        sub_indices = (np.array(action_high_order == self.vocab['action_high'].word2index(subgoal_analysis)).astype(int).nonzero()[0])
         processed_data['sub_indices'] = list(sub_indices)
 
         # This part seems to have a bug in your original code (`lang_instr` is defined but not used)
         # I've kept it as close as possible to what you provided.
         processed_data['lang_instr'] = ex['num']['lang_instr']
 
-        subgoal_lang = np.array(lang_instr_sep)[sub_indices]
+
+        subgoal_lang = [lang_instr_sep[i] for i in sub_indices]
 
         alow = []
         alow_manip = []
