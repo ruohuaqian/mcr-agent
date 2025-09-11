@@ -117,7 +117,7 @@ class Module(nn.Module):
             if self.args.fast_epoch:
                 train_stream = train_stream.take(args.batch * 10)
 
-            p_preprocess_function = self.preprocess_function
+            p_preprocess_function = partial(self.preprocess_function, load_frames=True)
             p_collate_fn = partial(self.collate_fn, device=device)
             # Apply processing and shuffling
 
