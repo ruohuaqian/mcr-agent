@@ -139,7 +139,7 @@ class Module(nn.Module):
             valid_seen_list = splits['valid_seen']
             valid_unseen_list = splits['valid_unseen']
 
-            train = [(s, False) for s in train_list]
+            train = [(s, 0) for s in train_list]
             train += [(s, i) for i in range(1, 7) for s in train_list]
             valid_seen = [(s, False) for s in valid_seen_list]
             valid_unseen = [(s, False) for s in valid_unseen_list]

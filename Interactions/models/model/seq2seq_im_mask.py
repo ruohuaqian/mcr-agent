@@ -230,7 +230,7 @@ class Module(Base):
 
                 if load_frames and not self.test_mode:
                     root = self.get_task_root(ex)
-                    if not swapColor:
+                    if swapColor == 0:
                         im = torch.load(os.path.join(root, self.feat_pt))
                     elif swapColor in [1, 2]:
                         im = torch.load(os.path.join(root, 'feat_conv_colorSwap{}_panoramic.pt'.format(swapColor)))
