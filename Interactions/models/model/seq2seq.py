@@ -102,7 +102,7 @@ class Module(nn.Module):
 
             train_list_original = splits['train']
             augmented_train_list = []
-            augmented_train_list.extend([dict(s, swapColor=False) for s in train_list_original])
+            augmented_train_list.extend([dict(s, swapColor=0) for s in train_list_original])
             for i in range(1, 7):
                 augmented_train_list.extend([dict(s, swapColor=i) for s in train_list_original])
 
