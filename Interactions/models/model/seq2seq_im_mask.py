@@ -381,7 +381,7 @@ class Module(Base):
 
         # Download and load the JSON file
         json_filename = f"{task_path_part}/pp/ann_{repeat_idx}.json"
-        local_json_path = hf_hub_download(repo_id=self.args.data, filename=json_filename, repo_type="dataset")
+        local_json_path = hf_hub_download(repo_id=self.args.huggingface_id, filename=json_filename, repo_type="dataset")
         with open(local_json_path, 'r', encoding='utf-8') as f:
             ex = json.load(f)
 
@@ -393,7 +393,7 @@ class Module(Base):
         elif swapColor in [3, 4, 5, 6]:
             pt_filename = f"{task_path_part}/feat_conv_onlyAutoAug{swapColor - 2}_panoramic.pt"
 
-        local_pt_path = hf_hub_download(repo_id=self.args.data, filename=pt_filename, repo_type="dataset")
+        local_pt_path = hf_hub_download(repo_id=self.args.huggingface_id, filename=pt_filename, repo_type="dataset")
         im = torch.load(local_pt_path, map_location='cpu')
 
         # 2. --- Feature Extraction (Logic from your original `featurize` loop) ---
