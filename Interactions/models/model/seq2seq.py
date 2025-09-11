@@ -47,6 +47,27 @@ class Module(nn.Module):
         # summary self.writer
         self.summary_writer = None
 
+    def _training_step(self, feat, batch, optimizer, train_iter):
+        '''
+        Helper function to perform a single training step.
+        This avoids code duplication in the main loop.
+        '''
+        # optimizer backward pass
+        optimizer.zero_grad()
+        out = self.forward(feat)
+        loss = self.compute_loss(out, batch, feat)
+        sum_loss = sum(loss.values())
+        sum_loss.backward()
+        optimizer.step()
+
+        # logging
+        for k, v in loss.items():
+            ln = 'loss_' + k
+            self.summary_writer.add_scalar('train/' + ln, v.item(), train_iter)
+        self.summary_writer.add_scalar('train/loss', sum_loss.item(), train_iter)
+
+        return sum_loss.detach().cpu().item(), len(batch)
+
     def run_train(self, splits, args=None, optimizer=None):
         '''
         training loop
@@ -54,34 +75,11 @@ class Module(nn.Module):
 
         # args
         args = args or self.args
+        device = torch.device('cuda') if args.gpu else torch.device('cpu')
+        self.to(device)
 
-        # splits
-        train_list = splits['train']
-        valid_seen = splits['valid_seen']
-        valid_unseen = splits['valid_unseen']
-        # different list structure
-        if args.use_streaming:
-            train = train_list
-        else:
-            train = [(s, False) for s in train_list]
-            train = train + [(s, 1) for s in train_list] + [(s, 2) for s in train_list]
-            train = train + [(s, 3) for s in train_list] + [(s, 4) for s in train_list] + [(s, 5) for s in train_list] + [(s, 6) for s in train_list]
-            valid_seen = [(s, False) for s in valid_seen]
-            valid_unseen = [(s, False) for s in valid_unseen]
-
-        # debugging: chose a small fraction of the dataset
-        if self.args.dataset_fraction > 0:
-            small_train_size = int(self.args.dataset_fraction * 0.7)
-            small_valid_size = int((self.args.dataset_fraction * 0.3) / 2)
-            train = train[:small_train_size]
-            valid_seen = valid_seen[:small_valid_size]
-            valid_unseen = valid_unseen[:small_valid_size]
-
-        # debugging: use to check if training loop works without waiting for full epoch
-        if self.args.fast_epoch:
-            train = train[-16:] if args.use_streaming else train[-112:]
-            valid_seen = valid_seen[:1]
-            valid_unseen = valid_unseen[:1]
+        # optimizer
+        optimizer = optimizer or torch.optim.Adam(self.parameters(), lr=args.lr)
 
         # initialize summary writer for tensorboardX
         self.summary_writer = SummaryWriter(log_dir=args.dout)
@@ -91,173 +89,148 @@ class Module(nn.Module):
         with open(fconfig, 'wt') as f:
             json.dump(vars(args), f, indent=2)
 
-        # optimizer
-        optimizer = optimizer or torch.optim.Adam(self.parameters(), lr=args.lr)
-
         # display dout
         print("Saving to: %s" % self.args.dout)
-        best_loss = {'train': 1e10, 'valid_seen': 1e10, 'valid_unseen': 1e10}
+
+        # -------------------------------------------------------------------------
+        # Data Preparation Stage
+        # -------------------------------------------------------------------------
+
         if args.use_streaming:
-            file_urls = []
-            BASE_URL = f"https://huggingface.co/datasets/{self.args.huggingface_id}/resolve/main"
-            for task_info in train:
+            print("Using streaming data pipeline...")
 
-                task_path = task_info['task']
-                repeat_idx = task_info['repeat_idx']
+            train_list_original = splits['train']
+            augmented_train_list = []
+            augmented_train_list.extend([dict(s, swapColor=False) for s in train_list_original])
+            for i in range(1, 7):
+                augmented_train_list.extend([dict(s, swapColor=i) for s in train_list_original])
 
-                relative_path = f"{task_path}/pp/ann_{repeat_idx}.json"
+            raw_datasets = DatasetDict()
+            raw_datasets['train'] = Dataset.from_list(augmented_train_list)
+            # Note: You would create your validation sets here too if you plan to use them
+            # raw_datasets['valid_seen'] = Dataset.from_list(...)
 
-                # 构造成完整的、可访问的URL
-                full_url = f"{BASE_URL}/{relative_path}"
-                file_urls.append(full_url)
+            train_stream = raw_datasets['train'].to_iterable_dataset()
 
-            train_stream = load_dataset(
-                "json",
-                data_files=file_urls,
-                streaming=True,
-                split="train"  # 对于流式加载，split='train'是固定写法
-            )
-            # dual problem of featurize
-            device = torch.device('cuda') if args.gpu else torch.device('cpu')
-            # param sure?
-            p_collate_fn = partial(self.collate_fn, vocab=self.vocab)
+            # debugging: use to check if training loop works without waiting for full epoch
+            if self.args.fast_epoch:
+                train_stream = train_stream.take(args.batch * 10)
 
-            augmented_train_stream = train_stream.flat_map(augment_with_swap_color)
-            processed_train_stream = augmented_train_stream.map(p_preprocess_function)
+            # Prepare partial functions
+            p_preprocess_function = partial(self.preprocess_function, args=args)
+            p_collate_fn = partial(self.collate_fn, device=device)
+
+            # Apply processing and shuffling
+            processed_train_stream = train_stream.map(p_preprocess_function)
             processed_train_stream = processed_train_stream.shuffle(buffer_size=1000, seed=args.seed)
 
-            train_loader = DataLoader(processed_train_stream, batch_size=args.batch, collate_fn=p_collate_fn)
+            # Create the final DataLoader
+            train_loader = DataLoader(
+                processed_train_stream,
+                batch_size=args.batch,
+                collate_fn=p_collate_fn
+            )
+        else:
+            print("Using local file pipeline...")
 
-        train_iter, valid_seen_iter, valid_unseen_iter = 0, 0, 0
+            # splits
+            train_list = splits['train']
+            valid_seen_list = splits['valid_seen']
+            valid_unseen_list = splits['valid_unseen']
+
+            train = [(s, False) for s in train_list]
+            train += [(s, i) for i in range(1, 7) for s in train_list]
+            valid_seen = [(s, False) for s in valid_seen_list]
+            valid_unseen = [(s, False) for s in valid_unseen_list]
+
+            # debugging: chose a small fraction of the dataset
+            if self.args.dataset_fraction > 0:
+                small_train_size = int(self.args.dataset_fraction * 0.7)
+                small_valid_size = int((self.args.dataset_fraction * 0.3) / 2)
+                train = train[:small_train_size]
+                valid_seen = valid_seen[:small_valid_size]
+                valid_unseen = valid_unseen[:small_valid_size]
+
+            # debugging: use to check if training loop works without waiting for full epoch
+            if self.args.fast_epoch:
+                train = train[-112:]
+                valid_seen = valid_seen[:1]
+                valid_unseen = valid_unseen[:1]
+
+        # -------------------------------------------------------------------------
+        # Main Epoch Loop
+        # -------------------------------------------------------------------------
+
+        train_iter = 0
         for epoch in trange(0, args.epoch, desc='epoch'):
             m_train = collections.defaultdict(list)
             self.train()
             self.adjust_lr(optimizer, args.lr, epoch, decay_epoch=args.decay_epoch)
-            total_train_loss = list()
-            random.shuffle(train) # shuffle every epoch
-            c_st=0
-            # streaming if-else
+            total_train_loss = []
+
+            # Choose the correct iterator based on the mode
             if args.use_streaming:
-                for i, (feat_batch, batch_metadata) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}")):
-                    c_st += 1
-                    if len(feat_batch['sub_objs']) == 0:
-                        continue
-
-                    out = self.forward(feat_batch)
-                    preds = self.extract_preds(out, batch_metadata, feat_batch)
-                    # p_train.update(preds)
-                    loss = self.compute_loss(out, batch_metadata, feat_batch)
-                    # print(loss.keys())
-                    for k, v in loss.items():
-                        ln = 'loss_' + k
-                        m_train[ln].append(v.item())
-                        self.summary_writer.add_scalar('train/' + ln, v.item(), train_iter)
-
-                    # optimizer backward pass
-                    optimizer.zero_grad()
-                    sum_loss = sum(loss.values())
-                    sum_loss.backward()
-                    optimizer.step()
-
-                    self.summary_writer.add_scalar('train/loss', sum_loss, train_iter)
-                    sum_loss = sum_loss.detach().cpu()
-                    total_train_loss.append(float(sum_loss))
-                    train_iter += self.args.batch
-
-                    if not (c_st % 2628):
-                        fsave = os.path.join(args.dout, f'net_epoch_{epoch}_{c_st}.pth')
-
-                        torch.save({
-                            'metric': {'epoch': epoch, 'c_st': c_st},  # stats,
-                            'model': self.state_dict(),
-                            'optim': optimizer.state_dict(),
-                            'args': self.args,
-                            'vocab': self.vocab,
-                        }, fsave)
-
-                stats = {'epoch': epoch, }
-
-                # save the latest checkpoint
-                if args.save_every_epoch:
-                    fsave = os.path.join(args.dout, 'net_epoch_%d.pth' % epoch)
-                else:
-                    fsave = os.path.join(args.dout, 'latest.pth')
-                torch.save({
-                    'metric': {'epoch': epoch},  # stats,
-                    'model': self.state_dict(),
-                    'optim': optimizer.state_dict(),
-                    'args': self.args,
-                    'vocab': self.vocab,
-                }, fsave)
-
-                # write stats
-                for split in stats.keys():
-                    if isinstance(stats[split], dict):
-                        for k, v in stats[split].items():
-                            self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
-                pprint.pprint(stats)
+                data_iterator = train_loader
             else:
-                for batch, feat in self.iterate(train, args.batch):
-                    c_st+=1
-                    if len(feat['sub_objs']) == 0 :
-                        continue
+                random.shuffle(train)  # shuffle every epoch
+                data_iterator = self.iterate(train, args.batch)
 
-                    out = self.forward(feat)
-                    preds = self.extract_preds(out, batch, feat)
-                    # p_train.update(preds)
-                    loss = self.compute_loss(out, batch, feat)
-                    # print(loss.keys())
-                    for k, v in loss.items():
-                        ln = 'loss_' + k
-                        m_train[ln].append(v.item())
-                        self.summary_writer.add_scalar('train/' + ln, v.item(), train_iter)
+            c_st = 0
+            for data_item in tqdm(data_iterator, desc="batch"):
+                c_st += 1
 
-                    # optimizer backward pass
-                    optimizer.zero_grad()
-                    sum_loss = sum(loss.values())
-                    sum_loss.backward()
-                    optimizer.step()
-
-                    self.summary_writer.add_scalar('train/loss', sum_loss, train_iter)
-                    sum_loss = sum_loss.detach().cpu()
-                    total_train_loss.append(float(sum_loss))
-                    train_iter += self.args.batch
-
-                    if not (c_st % 2628):
-
-                        fsave = os.path.join(args.dout, f'net_epoch_{epoch}_{c_st}.pth')
-
-                        torch.save({
-                            'metric': {'epoch': epoch, 'c_st':c_st}, #stats,
-                            'model': self.state_dict(),
-                            'optim': optimizer.state_dict(),
-                            'args': self.args,
-                            'vocab': self.vocab,
-                        }, fsave)
-
-
-                stats = {'epoch': epoch,}
-
-
-                # save the latest checkpoint
-                if args.save_every_epoch:
-                    fsave = os.path.join(args.dout, 'net_epoch_%d.pth' % epoch)
+                # Unpack the data item correctly for each mode
+                if args.use_streaming:
+                    feat, batch = data_item
                 else:
-                    fsave = os.path.join(args.dout, 'latest.pth')
-                torch.save({
-                    'metric': {'epoch': epoch}, #stats,
-                    'model': self.state_dict(),
-                    'optim': optimizer.state_dict(),
-                    'args': self.args,
-                    'vocab': self.vocab,
-                }, fsave)
+                    batch, feat = data_item
 
-                # write stats
-                for split in stats.keys():
-                    if isinstance(stats[split], dict):
-                        for k, v in stats[split].items():
-                            self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
-                pprint.pprint(stats)
+                if len(feat.get('sub_objs', [])) == 0:
+                    continue
+
+                # Perform a single training step
+                sum_loss, batch_len = self._training_step(feat, batch, optimizer, train_iter)
+                total_train_loss.append(sum_loss)
+                train_iter += batch_len
+
+                # Conditional checkpoint saving (original logic)
+                if not (c_st % 2628):
+                    fsave = os.path.join(args.dout, f'net_epoch_{epoch}_{c_st}.pth')
+                    torch.save({
+                        'metric': {'epoch': epoch, 'c_st': c_st},
+                        'model': self.state_dict(),
+                        'optim': optimizer.state_dict(),
+                        'args': self.args,
+                        'vocab': self.vocab,
+                    }, fsave)
+
+            # -------------------------------------------------------------------------
+            # Post-Epoch Actions
+            # -------------------------------------------------------------------------
+
+            # NOTE: Your validation loop would go here. It would also need an if/else
+            # to choose between the streaming validator and the list-based one.
+            stats = {'epoch': epoch}
+
+            # save the latest checkpoint
+            if args.save_every_epoch:
+                fsave = os.path.join(args.dout, 'net_epoch_%d.pth' % epoch)
+            else:
+                fsave = os.path.join(args.dout, 'latest.pth')
+            torch.save({
+                'metric': {'epoch': epoch},
+                'model': self.state_dict(),
+                'optim': optimizer.state_dict(),
+                'args': self.args,
+                'vocab': self.vocab,
+            }, fsave)
+
+            # write stats
+            for split in stats.keys():
+                if isinstance(stats[split], dict):
+                    for k, v in stats[split].items():
+                        self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
+            pprint.pprint(stats)
 
     def run_pred(self, dev, args=None, name='dev', iter=0):
         '''

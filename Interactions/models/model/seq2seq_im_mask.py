@@ -578,26 +578,6 @@ class Module(Base):
                 ], dim=1)
         return processed_data
 
-    def augment_with_swap_color(example):
-        """
-        Takes one example and yields seven versions of it,
-        each with a different swapColor value.
-        """
-        # The original task_info is a string, so we load it
-        task_info = json.loads(example['task_info'])
-
-        # Yield the original and 6 augmented versions
-        for swap_value in [False, 1, 2, 3, 4, 5, 6]:
-            # Create a fresh copy to avoid modifying the original in place
-            new_example = example.copy()
-
-            # Inject the new swapColor value
-            # We store it directly at the top level for easy access later
-            new_example['swapColor'] = swap_value
-
-            yield new_example
-
-
 
     def collate_fn(self, list_of_examples):
         device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
