@@ -528,46 +528,136 @@ class Module(Base):
         return dict(processed_data)
 
     def collate_fn(self, list_of_examples, device):
-        '''
-        This function is correct as you wrote it. It takes the output of preprocess_function
-        and creates the final batch of Tensors.
-        '''
+        """
+        Collate for streamed samples produced by `preprocess_function`.
+        - 不做任何下载/IO/解析；仅在 batch 维上聚合、对齐并张量化
+        - 先对齐非时间维(>=2D 的 dim>=1)，再对时间维用 pad_sequence
+        - 文本键做 emb + pack；objnav 做 emb；标签键用各自 PAD
+        """
+        import collections
+        import torch
+        import torch.nn.functional as F
+        from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
+
+        # ---------- 小工具：在指定维度右侧 padding 到 size ----------
+        def pad_along_dim(t: torch.Tensor, size: int, dim: int, value: float = 0.0) -> torch.Tensor:
+            if t.size(dim) == size:
+                return t
+            pad = [0, 0] * t.dim()  # F.pad 从最后一维开始指定 [left, right]
+            right = size - t.size(dim)
+            pad_index_from_end = 2 * (t.dim() - dim - 1)
+            pad[pad_index_from_end] = right
+            return F.pad(t, pad=pad, mode='constant', value=value)
+
+        # ---------- 1) 聚合 ----------
         feat = collections.defaultdict(list)
-        for example in list_of_examples:
-            # We add raw_ex to a separate list for metadata
-            if 'raw_ex' in example:
-                feat['batch_metadata'].append(example.pop('raw_ex'))
+        for ex in list_of_examples:
+            # ex 是 preprocess_function 返回的 processed_data
+            # raw_ex/metadata 单独保存
+            if 'raw_ex' in ex:
+                feat['batch_metadata'].append(ex['raw_ex'])
+            for k, v in ex.items():
+                if k == 'raw_ex':
+                    continue
+                feat[k].append(v)
 
-            for key, value in example.items():
-                feat[key].append(value)
+        if 'batch_metadata' not in feat:
+            feat['batch_metadata'] = []
 
-        # Your original tensorization and padding logic is correct
-        assert (np.all(np.array(list(map(len, feat['lang_instr']))) == np.array(list(map(len, feat['objnav'])))))
-        for k, v in feat.items():
-            if k in {'batch_metadata', 'sub_indices'}:
-                continue  # Skip metadata
-            if k in {'lang_goal', 'sub_lang'}:
-                seqs = [torch.tensor(vv, device=device) for vv in v]
-                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
-                seq_lengths = np.array(list(map(len, v)))
-                embed_seq = self.emb_word(pad_seq)
-                packed_input = pack_padded_sequence(embed_seq, seq_lengths, batch_first=True, enforce_sorted=False)
-                feat[k] = {'seqs': seqs, 'emb': embed_seq, 'pi': packed_input, 'seq_len': seq_lengths}
-            # ... and so on for all your other elif blocks ...
-            # ... (the rest of your collate_fn logic is correct) ...
-            else:
-                try:
-                    if isinstance(v[0], torch.Tensor):
-                        seqs = v
-                    else:
-                        seqs = [torch.tensor(vv, device=device, dtype=torch.float if ('frames' in k) else torch.long)
-                                for vv in v]
-                    pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
-                    feat[k] = pad_seq
-                except Exception:
-                    feat[k] = v
+        # 保留一致性断言（如果这两个键都在）
+        if 'lang_instr' in feat and 'objnav' in feat:
+            li = [len(x) for x in feat['lang_instr']]
+            on = [len(x) for x in feat['objnav']]
+            assert all(a == b for a, b in zip(li, on)), "lang_instr 与 objnav 的分段数不一致"
 
-        # The final return for the training loop should be a tuple
+        # ---------- 2) 针对不同 key 的对齐与张量化 ----------
+        TEXT_EMB_KEYS = {'lang_goal', 'sub_lang'}  # 需要 emb_word + pack
+        META_KEYS = {'batch_metadata', 'sub_indices'}  # 不张量化
+        LABEL_PAD_ACTION_HIGH = self.vocab['action_high'].word2index('<<pad>>')
+        LABEL_PAD_OBJNAV = self.vocab['objnav'].word2index('<<pad>>')
+
+        for k, v in list(feat.items()):
+            if k in META_KEYS:
+                continue
+
+            # --- A) 文本序列：emb + pack ---
+            if k in TEXT_EMB_KEYS:
+                seqs = [torch.as_tensor(vv, device=device, dtype=torch.long) for vv in v]  # List[(L,)]
+                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=int(self.pad))  # (B,L)
+                seq_lengths = torch.as_tensor([len(x) for x in v], dtype=torch.long)
+                emb = self.emb_word(pad_seq)  # (B,L,E)
+                pi = pack_padded_sequence(emb, seq_lengths.cpu(), batch_first=True, enforce_sorted=False)
+                feat[k] = {'seqs': seqs, 'emb': emb, 'pi': pi, 'seq_len': seq_lengths}
+                continue
+
+            # --- B) 分段文本：lang_instr（二维 List[List[int]]）：扁平化→pad+emb→还原 ---
+            if k == 'lang_instr':
+                num_instr = [len(seglist) for seglist in v]
+                flat = [torch.as_tensor(seg, device=device, dtype=torch.long) for seglist in v for seg in seglist]
+                if len(flat) == 0:
+                    feat[k] = {'seq': []}
+                    continue
+                pad_seq = pad_sequence(flat, batch_first=True, padding_value=int(self.pad))  # (sumL, Lmax)
+                emb = self.emb_word(pad_seq)  # (sumL, Lmax, E)
+                fin_seq, idx = [], 0
+                for l in num_instr:
+                    fin_seq.append(emb[idx:idx + l])  # List[(Ni, Lmax, E)]
+                    idx += l
+                feat[k] = {'seq': fin_seq}
+                continue
+
+            # --- C) 类别标签：action_high / action_high_order（只 pad，long） ---
+            if k in {'action_high', 'action_high_order'}:
+                seqs = [torch.as_tensor(vv, device=device, dtype=torch.long) for vv in v]  # List[(T,)]
+                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=int(LABEL_PAD_ACTION_HIGH))
+                feat[k] = pad_seq
+                continue
+
+            # --- D) objnav：pad 后做 emb（输出为 embedding） ---
+            if k == 'objnav':
+                seqs = [torch.as_tensor(vv, device=device, dtype=torch.long) for vv in v]
+                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=int(LABEL_PAD_OBJNAV))  # (B,T)
+                feat[k] = self.emb_objnav(pad_seq)  # (B,T,E)
+                continue
+
+            # --- E) action_low_mask：通常是 (T,K) float，直接 pad_sequence ---
+            if k == 'action_low_mask':
+                seqs = [torch.as_tensor(vv, device=device, dtype=torch.float) for vv in v]
+                feat[k] = pad_sequence(seqs, batch_first=True, padding_value=0.0)
+                continue
+
+            # --- F) action_low_mask_label：展平为 1D long（按你原始实现） ---
+            if k == 'action_low_mask_label':
+                flat = [x for vv in v for x in vv]
+                feat[k] = torch.as_tensor(flat, device=device, dtype=torch.long)
+                continue
+
+            # --- G) 辅助量：float pad ---
+            if k in {'subgoal_progress', 'subgoals_completed'}:
+                seqs = [torch.as_tensor(vv, device=device, dtype=torch.float) for vv in v]  # List[(T,)]
+                feat[k] = pad_sequence(seqs, batch_first=True, padding_value=float(self.pad))
+                continue
+
+            # --- H) 其它键（含 frames / feat / mask / sub_frames / orientation 等）---
+            # 规则：浮点走 0.0 pad；整型走 self.pad；且先对齐非时间维，再对时间维 pad_sequence
+            is_floatish = any(tag in k for tag in ('frames', 'im', 'mask', 'feat'))
+            dtype = torch.float if is_floatish else torch.long
+            pad_val = 0.0 if is_floatish else float(self.pad)
+
+            try:
+                seqs = [torch.as_tensor(vv, device=device, dtype=dtype) for vv in v]
+                if seqs and seqs[0].dim() >= 2:
+                    for d in range(1, seqs[0].dim()):  # 对齐非时间维
+                        max_d = max(s.size(d) for s in seqs)
+                        if any(s.size(d) != max_d for s in seqs):
+                            seqs = [pad_along_dim(s, max_d, d, value=pad_val) for s in seqs]
+                feat[k] = pad_sequence(seqs, batch_first=True, padding_value=pad_val)
+            except Exception as e:
+                # 兜底：保留原始列表，便于定位异常 key
+                # print(f"[collate_fn] key={k} fallback: {e}")
+                feat[k] = v
+
+        # ---------- 3) 返回 ----------
         return feat, feat.pop('batch_metadata')
 
     def serialize_lang_action(self, feat, action_high_order):

@@ -121,12 +121,16 @@ class Module(nn.Module):
             p_collate_fn = partial(self.collate_fn, device=device)
             # Apply processing and shuffling
 
-            processed_train_stream = train_stream.map(p_preprocess_function)
+            processed_train_stream = train_stream.map(p_preprocess_function, num_proc=16)
+            processed_train_stream = processed_train_stream.shuffle(buffer_size=1000, seed=args.seed)
+
             # ...
             train_loader = DataLoader(
                 processed_train_stream,
                 batch_size=args.batch,
-                collate_fn=p_collate_fn
+                collate_fn=p_collate_fn,
+                prefetch_factor = 2,  # <-- 推荐值：让数据加载更流畅
+                num_workers = 0
             )
         else:
             print("Using local file pipeline...")
