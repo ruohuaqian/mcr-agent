@@ -16,7 +16,6 @@ MODEL="seq2seq_im_mask"
 GPU=1
 DOUT="${MCR_ROOT}/exp/model:seq2seq_im_mask"
 RESUME=""
-SUBGOAL_ANALYSIS=""
 USE_TEMPLATED_GOALS=0
 USE_STREAMING=1  # 默认启用流式加载
 
@@ -64,7 +63,6 @@ while [[ $# -gt 0 ]]; do
     --no-gpu) GPU=0; shift;;
     --dout) DOUT="$2"; shift 2;;
     --resume) RESUME="$2"; shift 2;;
-    --subgoal_analysis) SUBGOAL_ANALYSIS="$2"; shift 2;;
     --use_templated_goals) USE_TEMPLATED_GOALS=1; shift;;
     --use_streaming) USE_STREAMING=1; shift;;
     --no-streaming) USE_STREAMING=0; shift;;
@@ -109,7 +107,6 @@ while [[ $# -gt 0 ]]; do
       echo "  --no-streaming        Disable streaming mode"
       echo ""
       echo "Required:"
-      echo "  --subgoal_analysis    Which subgoal to train (required)"
       echo ""
       echo "Other options same as original script"
       exit 0;;
@@ -117,12 +114,6 @@ while [[ $# -gt 0 ]]; do
       echo "[WARN] Unknown option: $1"; shift;;
   esac
 done
-
-# ========= validate required arguments =========
-if [[ -z "$SUBGOAL_ANALYSIS" ]]; then
-  echo "[ERROR] --subgoal_analysis is required"
-  exit 1
-fi
 
 # ========= fallback for splits path =========
 if [[ ! -f "$SPLITS" ]]; then
@@ -144,7 +135,6 @@ export PYTHONPATH="${MCR_ROOT}:${MCR_ROOT}/PCC:${PYTHONPATH}"
 # ========= training with streaming =========
 echo "[INFO] Training with Hugging Face Streaming Mode"
 echo "[INFO] Dataset: $HUGGINGFACE_ID"
-echo "[INFO] Subgoal: $SUBGOAL_ANALYSIS"
 
 # Assemble training command
 CMD=( python models/train/train_seq2seq_stream.py  # 使用流式训练脚本
@@ -154,7 +144,6 @@ CMD=( python models/train/train_seq2seq_stream.py  # 使用流式训练脚本
   --pp_folder "$PP_FOLDER"
   --model "$MODEL"
   --dout "$DOUT"
-  --subgoal_analysis "$SUBGOAL_ANALYSIS"
   --batch "$BATCH"
   --epoch "$EPOCH"
   --lr "$LR"
