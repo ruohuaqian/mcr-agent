@@ -388,11 +388,11 @@ class Module(Base):
 
         # Download and load the correct .pt feature file based on swapColor
         if not swapColor:
-            pt_filename = f"{task_path_part}/feat.pt"
+            pt_filename = f"train/{task_path_part}/feat.pt"
         elif swapColor in [1, 2]:
-            pt_filename = f"{task_path_part}/feat_conv_colorSwap{swapColor}_panoramic.pt"
+            pt_filename = f"train/{task_path_part}/feat_conv_colorSwap{swapColor}_panoramic.pt"
         elif swapColor in [3, 4, 5, 6]:
-            pt_filename = f"{task_path_part}/feat_conv_onlyAutoAug{swapColor - 2}_panoramic.pt"
+            pt_filename = f"train/{task_path_part}/feat_conv_onlyAutoAug{swapColor - 2}_panoramic.pt"
 
         local_pt_path = hf_hub_download(repo_id=self.args.huggingface_id, filename=pt_filename, repo_type="dataset")
         im = torch.load(local_pt_path, map_location='cpu')
