@@ -59,7 +59,7 @@ class Module(nn.Module):
         valid_seen = splits['valid_seen']
         valid_unseen = splits['valid_unseen']
         # different list structure
-        if args.use_streamimg:
+        if args.use_streaming:
             train = train_list
         else:
             train = [(s, False) for s in train_list]
