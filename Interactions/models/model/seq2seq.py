@@ -9,7 +9,7 @@ from torch import nn
 from tensorboardX import SummaryWriter
 from tqdm import trange,tqdm
 from Interactions.models.model import constants
-from datasets import Dataset
+from datasets import Dataset, load_dataset
 from huggingface_hub import hf_hub_download
 classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp', 'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
 
