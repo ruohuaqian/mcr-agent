@@ -121,7 +121,7 @@ class Module(nn.Module):
             p_collate_fn = partial(self.collate_fn, device=device)
             # Apply processing and shuffling
 
-            processed_train_stream = train_stream.map(p_preprocess_function, num_proc=16)
+            processed_train_stream = train_stream.map(p_preprocess_function)
             processed_train_stream = processed_train_stream.shuffle(buffer_size=1000, seed=args.seed)
 
             # ...
