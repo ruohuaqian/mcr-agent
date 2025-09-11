@@ -124,7 +124,6 @@ class Module(nn.Module):
             processed_train_stream = train_stream.map(p_preprocess_function)
             processed_train_stream = processed_train_stream.shuffle(buffer_size=1000, seed=args.seed)
 
-            # ...
             train_loader = DataLoader(
                 processed_train_stream,
                 batch_size=args.batch,

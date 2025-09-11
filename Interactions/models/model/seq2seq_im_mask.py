@@ -582,12 +582,46 @@ class Module(Base):
 
             # --- A) 文本序列：emb + pack ---
             if k in TEXT_EMB_KEYS:
-                seqs = [torch.as_tensor(vv, device=device, dtype=torch.long) for vv in v]  # List[(L,)]
-                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=int(self.pad))  # (B,L)
-                seq_lengths = torch.as_tensor([len(x) for x in v], dtype=torch.long)
-                emb = self.emb_word(pad_seq)  # (B,L,E)
-                pi = pack_padded_sequence(emb, seq_lengths.cpu(), batch_first=True, enforce_sorted=False)
-                feat[k] = {'seqs': seqs, 'emb': emb, 'pi': pi, 'seq_len': seq_lengths}
+                # v: List[seq]，理想是 1D token ids；但有时会是 2D: (num_seg, L)
+                seqs_raw = [torch.as_tensor(vv, device=device, dtype=torch.long) for vv in v]
+                ndims = [t.dim() for t in seqs_raw]
+
+                if all(d == 1 for d in ndims):
+                    # --- 标准路径：每样本一个 1D token 序列 ---
+                    pad_seq = pad_sequence(seqs_raw, batch_first=True, padding_value=int(self.pad))  # (B, L)
+                    seq_lengths = torch.as_tensor([t.numel() for t in seqs_raw], dtype=torch.long)
+                    emb = self.emb_word(pad_seq)  # (B, L, E)
+                    pi = pack_padded_sequence(emb, seq_lengths.cpu(), batch_first=True, enforce_sorted=False)
+                    feat[k] = {'seqs': seqs_raw, 'emb': emb, 'pi': pi, 'seq_len': seq_lengths}
+                else:
+                    # --- 兼容路径：出现 2D（分段）或混合维度的情况 ---
+                    # 统一把每个样本变成“段列表”
+                    per_sample_segments = []
+                    for t in seqs_raw:
+                        if t.dim() == 1:
+                            per_sample_segments.append([t])  # 单段
+                        elif t.dim() == 2:
+                            # 视为 num_seg x L，每一行是一个段
+                            per_sample_segments.append([row for row in t])  # List[(L,)]
+                        else:
+                            raise ValueError(f"Unexpected ndim for {k}: {t.shape}")
+
+                    num_seg = [len(seg_list) for seg_list in per_sample_segments]
+                    flat = [seg for seg_list in per_sample_segments for seg in seg_list]  # 扁平化所有段
+
+                    if len(flat) == 0:
+                        feat[k] = {'seq': []}  # 空批兜底
+                    else:
+                        pad_flat = pad_sequence(flat, batch_first=True, padding_value=int(self.pad))  # (sum_seg, Lmax)
+                        emb_flat = self.emb_word(pad_flat)  # (sum_seg, Lmax, E)
+
+                        # 还原为按样本的段列表（与 lang_instr 的输出结构一致）
+                        fin_seq, idx = [], 0
+                        for n in num_seg:
+                            fin_seq.append(emb_flat[idx:idx + n])  # List[(n_i, Lmax, E)]
+                            idx += n
+
+                        feat[k] = {'seq': fin_seq}
                 continue
 
             # --- B) 分段文本：lang_instr（二维 List[List[int]]）：扁平化→pad+emb→还原 ---
