@@ -2,7 +2,7 @@ import os
 import cv2
 import torch
 import numpy as np
-import Interactions.nn.vnn as vnn
+import Interactions.models.nn.vnn as vnn
 import collections
 from torch import nn
 from torch.nn import functional as F
@@ -10,6 +10,7 @@ from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_se
 from Interactions.models.model.seq2seq import Module as Base
 from Interactions.models.utils.metric import compute_f1, compute_exact
 from gen.utils.image_util import decompress_mask
+from datasets import load_dataset
 
 from PIL import Image
 from itertools import groupby
