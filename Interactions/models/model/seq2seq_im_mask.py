@@ -82,6 +82,7 @@ class Module(Base):
         self.panoramic = args.panoramic
         self.orientation = args.orientation
         self.man_action = self.vocab['action_low'].word2index('Manipulate', train=False)
+
     def featurize(self, batch, load_mask=True, load_frames=True):
         '''
         tensorize and pad batch input
@@ -97,23 +98,20 @@ class Module(Base):
             action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
             low_to_high_idx = ex['num']['low_to_high_idx']
             action_high = action_high_order[low_to_high_idx]
-            
 
             feat['action_high'].append(action_high)
             feat['action_high_order'].append(action_high_order)
-            
 
-            val_action_high = (action_high == self.vocab['action_high'].word2index('GotoLocation', train=False)).astype(np.int64)
+            val_action_high = (action_high == self.vocab['action_high'].word2index('GotoLocation', train=False)).astype(
+                np.int64)
 
-
-            v=0
-            while v < (len(val_action_high)-1):
-                if (val_action_high[v] - val_action_high[v+1]) == 1:
-                    val_action_high[v+1] = 1
-                    v+=1
-                v+=1
-            val_action_high[-1]=1
-            
+            v = 0
+            while v < (len(val_action_high) - 1):
+                if (val_action_high[v] - val_action_high[v + 1]) == 1:
+                    val_action_high[v + 1] = 1
+                    v += 1
+                v += 1
+            val_action_high[-1] = 1
 
             #########
             # inputs
@@ -124,16 +122,16 @@ class Module(Base):
 
             subgoal_analysis = self.args.subgoal_analysis
 
-
             alow_list = [a['action'] for a in ex['num']['action_low']]
-            sub_action_high = (action_high == self.vocab['action_high'].word2index(subgoal_analysis, train=False)).astype(np.int64)
+            sub_action_high = (
+                        action_high == self.vocab['action_high'].word2index(subgoal_analysis, train=False)).astype(
+                np.int64)
             sub_actions = np.array(alow_list)[sub_action_high.nonzero()[0].astype(int)]
-
 
             # goal and instr language
             lang_goal, lang_instr = ex['num']['lang_goal'], ex['num']['lang_instr']
             lang_instr_sep = ex['num']['lang_instr_sep']
-            
+
             # zero inputs if specified
             lang_goal = self.zero_input(lang_goal) if self.args.zero_goal else lang_goal
             lang_instr = self.zero_input(lang_instr) if self.args.zero_instr else lang_instr
@@ -144,37 +142,37 @@ class Module(Base):
             feat['lang_instr'].append(lang_instr)
             # feat['lang_instr_sep'].append(lang_instr_sep)
 
-
-
-            sub_indices = (np.array(action_high_order == self.vocab['action_high'].word2index(subgoal_analysis)).astype(int).nonzero()[0])
+            sub_indices = (
+                np.array(action_high_order == self.vocab['action_high'].word2index(subgoal_analysis)).astype(
+                    int).nonzero()[0])
             subgoal_lang = np.array(lang_instr_sep)[sub_indices]
 
             feat['sub_indices'].append(list(sub_indices))
-           
+
             #########
             # outputs
             #########
 
-                
             alow = []
             alow_manip = []
             obj_high_indices = []
 
             for ia, a in enumerate(ex['num']['action_low']):
-                
-                if val_action_high[ia]==1 and a['action'] in self.vocab['action_low'].word2index(['<<pad>>', '<<seg>>', '<<stop>>', 
-                                                                                                 'LookDown_15', 'LookUp_15',
-                                                                                                 'RotateLeft_90', 'RotateRight_90', 
-                                                                                                 'MoveAhead_25'], train=False):
+
+                if val_action_high[ia] == 1 and a['action'] in self.vocab['action_low'].word2index(
+                        ['<<pad>>', '<<seg>>', '<<stop>>',
+                         'LookDown_15', 'LookUp_15',
+                         'RotateLeft_90', 'RotateRight_90',
+                         'MoveAhead_25'], train=False):
                     alow.append(a['action'])
-                elif val_action_high[ia]==1:
+                elif val_action_high[ia] == 1:
                     alow.append(self.vocab['action_low'].word2index('Manipulate', train=False))
-                
+
                 # print(self.vocab['action_low'].index2word(a['action']), a['action'])
-                if not (a['action'] in self.vocab['action_low'].word2index(['<<pad>>', '<<seg>>', '<<stop>>', 
-                                                                             'LookDown_15', 'LookUp_15',
-                                                                             'RotateLeft_90', 'RotateRight_90', 
-                                                                             'MoveAhead_25'], train=False)):
+                if not (a['action'] in self.vocab['action_low'].word2index(['<<pad>>', '<<seg>>', '<<stop>>',
+                                                                            'LookDown_15', 'LookUp_15',
+                                                                            'RotateLeft_90', 'RotateRight_90',
+                                                                            'MoveAhead_25'], train=False)):
                     alow_manip.append(a['action'])
                     obj_high_indices.append(low_to_high_idx[ia])
 
@@ -183,48 +181,50 @@ class Module(Base):
             feat['obj_high_indices'].append(obj_high_indices)
 
             if self.args.subgoal_aux_loss_wt > 0:
-                feat['subgoals_completed'].append(np.array(ex['num']['low_to_high_idx'])[val_action_high.nonzero()[0].astype(int)] / self.max_subgoals)
+                feat['subgoals_completed'].append(
+                    np.array(ex['num']['low_to_high_idx'])[
+                        val_action_high.nonzero()[0].astype(int)] / self.max_subgoals)
 
             # progress monitor supervision
             if self.args.pm_aux_loss_wt > 0:
                 # num_actions = len([a for sg in ex['num']['action_low'] for a in sg])
                 num_actions = len(alow)
-                subgoal_progress = [(i+1)/float(num_actions) for i in range(num_actions)]
+                subgoal_progress = [(i + 1) / float(num_actions) for i in range(num_actions)]
                 feat['subgoal_progress'].append(subgoal_progress)
 
-
-
-
             obj_list = [self.vocab['objnav'].word2index('<<nav>>')]
-            high_idx=0
-          
+            high_idx = 0
+
             indices = []
-            
+
             for a in ex['plan']['low_actions']:
                 if a['api_action']['action'] in ['MoveAhead', 'LookUp', 'LookDown', 'RotateRight', 'RotateLeft']:
-                    if a['high_idx'] == (high_idx+1):
+                    if a['high_idx'] == (high_idx + 1):
                         obj_list.append(self.vocab['objnav'].word2index('<<nav>>', train=False))
-                        high_idx+=1
+                        high_idx += 1
                     continue
                 if a['api_action']['action'] == 'PutObject':
                     label = a['api_action']['receptacleObjectId'].split('|')
                 else:
                     label = a['api_action']['objectId'].split('|')
                 indices.append(classes.index(label[4].split('_')[0] if len(label) >= 5 else label[0]))
-                
-                if a['high_idx'] == (high_idx+1):
-                    obj_list.append(self.vocab['objnav'].word2index((label[4].split('_')[0] if len(label) >= 5 else label[0]).lower(), train=False))
-                    high_idx+=1 
 
-            new_obj_list = [obj_list[o+1] for o, obj in enumerate(obj_list) if (obj == self.vocab['objnav'].word2index('<<nav>>'))]
-           
+                if a['high_idx'] == (high_idx + 1):
+                    obj_list.append(
+                        self.vocab['objnav'].word2index(
+                            (label[4].split('_')[0] if len(label) >= 5 else label[0]).lower(),
+                            train=False))
+                    high_idx += 1
+
+            new_obj_list = [obj_list[o + 1] for o, obj in enumerate(obj_list) if
+                            (obj == self.vocab['objnav'].word2index('<<nav>>'))]
+
             feat['objnav'].append(new_obj_list)
             feat['action_low_mask_label'].append(indices)
 
-
             if len(sub_actions) > 0:
                 sah = []
-                for k, g in groupby(enumerate(sub_action_high.nonzero()[0]), lambda ix : ix[0] - ix[1]):
+                for k, g in groupby(enumerate(sub_action_high.nonzero()[0]), lambda ix: ix[0] - ix[1]):
                     sah.append(np.array(list(map(itemgetter(1), g))))
 
                 if load_frames and not self.test_mode:
@@ -234,72 +234,74 @@ class Module(Base):
                     elif swapColor in [1, 2]:
                         im = torch.load(os.path.join(root, 'feat_conv_colorSwap{}_panoramic.pt'.format(swapColor)))
                     elif swapColor in [3, 4, 5, 6]:
-                        im = torch.load(os.path.join(root, 'feat_conv_onlyAutoAug{}_panoramic.pt'.format(swapColor - 2)))
+                        im = torch.load(
+                            os.path.join(root, 'feat_conv_onlyAutoAug{}_panoramic.pt'.format(swapColor - 2)))
 
                     sub_frames_high = np.copy(sub_action_high)
-                    
-                    for sfh in range(1,len(sub_frames_high)):
-                        if sub_action_high[sfh] < sub_action_high[sfh-1]:
+
+                    for sfh in range(1, len(sub_frames_high)):
+                        if sub_action_high[sfh] < sub_action_high[sfh - 1]:
                             sub_frames_high[sfh] = 1
-                    
+
                     sub_frames = im[2][sub_frames_high.nonzero()[0]]
 
                 sac_ind = 0
-                sfr_ind=0
+                sfr_ind = 0
                 for sii, s in enumerate(sah):
 
-                    so = np.array(indices)[(np.array(obj_high_indices) == np.array(low_to_high_idx)[s][0]).astype(int).nonzero()[0]]
+                    so = np.array(indices)[
+                        (np.array(obj_high_indices) == np.array(low_to_high_idx)[s][0]).astype(int).nonzero()[0]]
 
                     feat['sub_objs'].append(so)
-                    feat['sub_actions'].append(list(sub_actions[sac_ind:sac_ind+len(s)]) + [self.stop_token])
-                    
+                    feat['sub_actions'].append(list(sub_actions[sac_ind:sac_ind + len(s)]) + [self.stop_token])
+
                     if load_frames and not self.test_mode:
-                        feat['sub_frames'].append(sub_frames[sfr_ind:sfr_ind+len(s)+1])
+                        feat['sub_frames'].append(sub_frames[sfr_ind:sfr_ind + len(s) + 1])
 
                     feat['sub_lang'].append(subgoal_lang[sii])
 
                     sac_ind += len(s)
-                    sfr_ind += (len(s)+1)
+                    sfr_ind += (len(s) + 1)
 
                 if self.orientation:
                     import math
                     def get_orientation(d):
                         if d == 'left':
-                           h, v = -math.pi/2, 0.0
+                            h, v = -math.pi / 2, 0.0
                         elif d == 'up':
-                           h, v = 0.0, -math.pi/12
+                            h, v = 0.0, -math.pi / 12
                         elif d == 'down':
-                           h, v = 0.0, math.pi/12
+                            h, v = 0.0, math.pi / 12
                         elif d == 'right':
-                           h, v = math.pi/2, 0.0
+                            h, v = math.pi / 2, 0.0
                         else:
-                           h, v = 0.0, 0.0
+                            h, v = 0.0, 0.0
 
                         orientation = torch.cat([
-                            torch.cos(torch.ones(1)*(h)),
-                            torch.sin(torch.ones(1)*(h)),
-                            torch.cos(torch.ones(1)*(v)),
-                            torch.sin(torch.ones(1)*(v)),
-                        ]).unsqueeze(-1).unsqueeze(-1).repeat(1,7,7)
+                            torch.cos(torch.ones(1) * (h)),
+                            torch.sin(torch.ones(1) * (h)),
+                            torch.cos(torch.ones(1) * (v)),
+                            torch.sin(torch.ones(1) * (v)),
+                        ]).unsqueeze(-1).unsqueeze(-1).repeat(1, 7, 7)
 
                         return orientation
 
                     feat['frames'][-1] = torch.cat([
-                        feat['frames'][-1], get_orientation('front').repeat(len(feat['frames'][-1]), 1,1,1)
+                        feat['frames'][-1], get_orientation('front').repeat(len(feat['frames'][-1]), 1, 1, 1)
                     ], dim=1)
                     feat['frames_left'][-1] = torch.cat([
-                        feat['frames_left'][-1], get_orientation('left').repeat(len(feat['frames_left'][-1]), 1,1,1)
+                        feat['frames_left'][-1], get_orientation('left').repeat(len(feat['frames_left'][-1]), 1, 1, 1)
                     ], dim=1)
                     feat['frames_up'][-1] = torch.cat([
-                        feat['frames_up'][-1], get_orientation('up').repeat(len(feat['frames_up'][-1]), 1,1,1)
+                        feat['frames_up'][-1], get_orientation('up').repeat(len(feat['frames_up'][-1]), 1, 1, 1)
                     ], dim=1)
                     feat['frames_down'][-1] = torch.cat([
-                        feat['frames_down'][-1], get_orientation('down').repeat(len(feat['frames_down'][-1]), 1,1,1)
+                        feat['frames_down'][-1], get_orientation('down').repeat(len(feat['frames_down'][-1]), 1, 1, 1)
                     ], dim=1)
                     feat['frames_right'][-1] = torch.cat([
-                        feat['frames_right'][-1], get_orientation('right').repeat(len(feat['frames_right'][-1]), 1,1,1)
+                        feat['frames_right'][-1],
+                        get_orientation('right').repeat(len(feat['frames_right'][-1]), 1, 1, 1)
                     ], dim=1)
-
         assert(np.all(np.array(list(map(len, feat['lang_instr']))) == np.array(list(map(len, feat['objnav']))))) 
         # tensorization and padding
         for k, v in feat.items():
@@ -362,6 +364,308 @@ class Module(Base):
 
         return feat
 
+    def preprocess_function(self, ex, load_frames):
+        swapColor = ex['swapColor']
+        action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
+        low_to_high_idx = ex['num']['low_to_high_idx']
+        action_high = action_high_order[low_to_high_idx]
+        processed_data = dict()
+        processed_data['action_high'] = action_high
+        processed_data['action_high_order']= action_high_order
+        val_action_high = (action_high == self.vocab['action_high'].word2index('GotoLocation', train=False)).astype(
+            np.int64)
+
+        v = 0
+        while v < (len(val_action_high) - 1):
+            if (val_action_high[v] - val_action_high[v + 1]) == 1:
+                val_action_high[v + 1] = 1
+                v += 1
+            v += 1
+        val_action_high[-1] = 1
+
+        #########
+        # inputs
+        #########
+
+        # serialize segments
+        self.serialize_lang_action(ex, action_high_order)
+
+        subgoal_analysis = self.args.subgoal_analysis
+
+        alow_list = [a['action'] for a in ex['num']['action_low']]
+        sub_action_high = (action_high == self.vocab['action_high'].word2index(subgoal_analysis, train=False)).astype(
+            np.int64)
+        sub_actions = np.array(alow_list)[sub_action_high.nonzero()[0].astype(int)]
+
+        # goal and instr language
+        lang_goal, lang_instr = ex['num']['lang_goal'], ex['num']['lang_instr']
+        lang_instr_sep = ex['num']['lang_instr_sep']
+
+        # zero inputs if specified
+        lang_goal = self.zero_input(lang_goal) if self.args.zero_goal else lang_goal
+        lang_instr = self.zero_input(lang_instr) if self.args.zero_instr else lang_instr
+        lang_instr_sep = self.zero_input(lang_instr_sep) if self.args.zero_instr else lang_instr_sep
+
+        # append goal + instr
+        processed_data['lang_goal'] = lang_goal
+        processed_data['lang_instr'] = lang_instr
+        # feat['lang_instr_sep'].append(lang_instr_sep)
+
+        sub_indices = (
+            np.array(action_high_order == self.vocab['action_high'].word2index(subgoal_analysis)).astype(int).nonzero()[
+                0])
+        subgoal_lang = np.array(lang_instr_sep)[sub_indices]
+
+        processed_data['sub_indices'] = list(sub_indices)
+        #########
+        # outputs
+        #########
+
+        alow = []
+        alow_manip = []
+        obj_high_indices = []
+
+        for ia, a in enumerate(ex['num']['action_low']):
+
+            if val_action_high[ia] == 1 and a['action'] in self.vocab['action_low'].word2index(
+                    ['<<pad>>', '<<seg>>', '<<stop>>',
+                     'LookDown_15', 'LookUp_15',
+                     'RotateLeft_90', 'RotateRight_90',
+                     'MoveAhead_25'], train=False):
+                alow.append(a['action'])
+            elif val_action_high[ia] == 1:
+                alow.append(self.vocab['action_low'].word2index('Manipulate', train=False))
+
+            # print(self.vocab['action_low'].index2word(a['action']), a['action'])
+            if not (a['action'] in self.vocab['action_low'].word2index(['<<pad>>', '<<seg>>', '<<stop>>',
+                                                                        'LookDown_15', 'LookUp_15',
+                                                                        'RotateLeft_90', 'RotateRight_90',
+                                                                        'MoveAhead_25'], train=False)):
+                alow_manip.append(a['action'])
+                obj_high_indices.append(low_to_high_idx[ia])
+
+        processed_data['action_low'] = alow
+        processed_data['action_low_manip'] = alow_manip
+        processed_data['obj_high_indices'] = obj_high_indices
+        if self.args.subgoal_aux_loss_wt > 0:
+            processed_data['subgoals_completed'] = np.array(ex['num']['low_to_high_idx'])[val_action_high.nonzero()[0].astype(int)] / self.max_subgoals
+
+        # progress monitor supervision
+        if self.args.pm_aux_loss_wt > 0:
+            # num_actions = len([a for sg in ex['num']['action_low'] for a in sg])
+            num_actions = len(alow)
+            subgoal_progress = [(i + 1) / float(num_actions) for i in range(num_actions)]
+            processed_data['subgoal_progress'] = subgoal_progress
+        obj_list = [self.vocab['objnav'].word2index('<<nav>>')]
+        high_idx = 0
+
+        indices = []
+
+        for a in ex['plan']['low_actions']:
+            if a['api_action']['action'] in ['MoveAhead', 'LookUp', 'LookDown', 'RotateRight', 'RotateLeft']:
+                if a['high_idx'] == (high_idx + 1):
+                    obj_list.append(self.vocab['objnav'].word2index('<<nav>>', train=False))
+                    high_idx += 1
+                continue
+            if a['api_action']['action'] == 'PutObject':
+                label = a['api_action']['receptacleObjectId'].split('|')
+            else:
+                label = a['api_action']['objectId'].split('|')
+            indices.append(classes.index(label[4].split('_')[0] if len(label) >= 5 else label[0]))
+
+            if a['high_idx'] == (high_idx + 1):
+                obj_list.append(
+                    self.vocab['objnav'].word2index((label[4].split('_')[0] if len(label) >= 5 else label[0]).lower(),
+                                                    train=False))
+                high_idx += 1
+
+        new_obj_list = [obj_list[o + 1] for o, obj in enumerate(obj_list) if
+                        (obj == self.vocab['objnav'].word2index('<<nav>>'))]
+
+        processed_data['objnav'] = new_obj_list
+        processed_data['action_low_mask_label'] = indices
+        if len(sub_actions) > 0:
+            sah = []
+            for k, g in groupby(enumerate(sub_action_high.nonzero()[0]), lambda ix: ix[0] - ix[1]):
+                sah.append(np.array(list(map(itemgetter(1), g))))
+
+            if load_frames and not self.test_mode:
+                task_path_part = ex['root'].replace("data/json_feat_2.1.0","train") #data/json_feat_2.1.0/look_at_obj_in_light-AlarmClock-None-DeskLamp-304/trial_T20190909_152102_649589
+
+                pt_filename_prefix = f"https://huggingface.co/datasets/{self.args.huggingface_id}/resolve/main/{task_path_part}/"
+                if not swapColor:
+                    local_pt_path = hf_hub_download(
+                        repo_id=args.data,
+                        filename=os.path.join(pt_filename_prefix,self.feat_pt),
+                        repo_type="dataset"
+                    )
+                elif swapColor in [1, 2]:
+                    local_pt_path = hf_hub_download(
+                        repo_id=args.data,
+                        filename=os.path.join(pt_filename_prefix, 'feat_conv_colorSwap{}_panoramic.pt'.format(swapColor)),
+                        repo_type="dataset"
+                    )
+                elif swapColor in [3, 4, 5, 6]:
+                    local_pt_path = hf_hub_download(
+                        repo_id=args.data,
+                        filename=os.path.join(pt_filename_prefix, 'feat_conv_onlyAutoAug{}_panoramic.pt'.format(swapColor - 2)),
+                        repo_type="dataset"
+                    )
+                im = torch.load(local_pt_path, map_location='cpu')
+                sub_frames_high = np.copy(sub_action_high)
+
+                for sfh in range(1, len(sub_frames_high)):
+                    if sub_action_high[sfh] < sub_action_high[sfh - 1]:
+                        sub_frames_high[sfh] = 1
+
+                sub_frames = im[2][sub_frames_high.nonzero()[0]]
+
+            sac_ind = 0
+            sfr_ind = 0
+            for sii, s in enumerate(sah):
+
+                so = np.array(indices)[
+                    (np.array(obj_high_indices) == np.array(low_to_high_idx)[s][0]).astype(int).nonzero()[0]]
+
+                processed_data['sub_objs'] = so
+                processed_data['sub_actions'] = list(sub_actions[sac_ind:sac_ind + len(s)]) + [self.stop_token]
+
+                if load_frames and not self.test_mode:
+                    processed_data['sub_frames'].append(sub_frames[sfr_ind:sfr_ind + len(s) + 1])
+
+                processed_data['sub_lang'] = subgoal_lang[sii]
+
+                sac_ind += len(s)
+                sfr_ind += (len(s) + 1)
+            if self.orientation:
+                import math
+                def get_orientation(d):
+                    if d == 'left':
+                        h, v = -math.pi / 2, 0.0
+                    elif d == 'up':
+                        h, v = 0.0, -math.pi / 12
+                    elif d == 'down':
+                        h, v = 0.0, math.pi / 12
+                    elif d == 'right':
+                        h, v = math.pi / 2, 0.0
+                    else:
+                        h, v = 0.0, 0.0
+
+                    orientation = torch.cat([
+                        torch.cos(torch.ones(1) * (h)),
+                        torch.sin(torch.ones(1) * (h)),
+                        torch.cos(torch.ones(1) * (v)),
+                        torch.sin(torch.ones(1) * (v)),
+                    ]).unsqueeze(-1).unsqueeze(-1).repeat(1, 7, 7)
+
+                    return orientation
+
+                processed_data['frames'] = torch.cat([
+                    processed_data['frames'], get_orientation('front').repeat(len(processed_data['frames']), 1, 1, 1)
+                ], dim=1)
+                processed_data['frames_left'] = torch.cat([
+                    processed_data['frames_left'], get_orientation('left').repeat(len(processed_data['frames_left']), 1, 1, 1)
+                ], dim=1)
+                processed_data['frames_up'] = torch.cat([
+                    processed_data['frames_up'], get_orientation('up').repeat(len(processed_data['frames_up']), 1, 1, 1)
+                ], dim=1)
+                processed_data['frames_down'] = torch.cat([
+                    processed_data['frames_down'], get_orientation('down').repeat(len(processed_data['frames_down']), 1, 1, 1)
+                ], dim=1)
+                processed_data['frames_right'] = torch.cat([
+                    processed_data['frames_right'], get_orientation('right').repeat(len(processed_data['frames_right']), 1, 1, 1)
+                ], dim=1)
+        return processed_data
+
+    def augment_with_swap_color(example):
+        """
+        Takes one example and yields seven versions of it,
+        each with a different swapColor value.
+        """
+        # The original task_info is a string, so we load it
+        task_info = json.loads(example['task_info'])
+
+        # Yield the original and 6 augmented versions
+        for swap_value in [False, 1, 2, 3, 4, 5, 6]:
+            # Create a fresh copy to avoid modifying the original in place
+            new_example = example.copy()
+
+            # Inject the new swapColor value
+            # We store it directly at the top level for easy access later
+            new_example['swapColor'] = swap_value
+
+            yield new_example
+
+
+
+    def collate_fn(self, list_of_examples , device):
+        device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
+        feat = collections.defaultdict(list)
+        for example in list_of_examples:
+            for key, value in example.items():
+                feat[key].append(value)
+        assert (np.all(np.array(list(map(len, feat['lang_instr']))) == np.array(list(map(len, feat['objnav'])))))
+        # tensorization and padding
+        for k, v in feat.items():
+            if k in {'lang_goal', 'sub_lang'}:
+                # language embedding and padding
+                seqs = [torch.tensor(vv, device=device) for vv in v]
+                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+                seq_lengths = np.array(list(map(len, v)))
+                embed_seq = self.emb_word(pad_seq)
+                packed_input = pack_padded_sequence(embed_seq, seq_lengths, batch_first=True, enforce_sorted=False)
+                feat[k] = {'seqs': seqs, 'emb': embed_seq, 'pi': packed_input, 'seq_len': seq_lengths}
+            elif k in {'sub_indices'}:
+                pass
+            elif k in {'lang_instr'}:
+                # language embedding and padding
+                num_instr = np.array(list(map(len, v)))
+                seqs = [torch.tensor(vvv, device=device) for vv in v for vvv in vv]
+
+                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+
+                # lang_pad = (pad_seq==0)
+                embed_seq = self.emb_word(pad_seq)
+                fin_seq = []
+
+                in_idx = 0
+                for l in num_instr:
+                    fin_seq.append(embed_seq[in_idx:in_idx + l])
+
+                    in_idx += l
+                feat[k] = {'seq': fin_seq}
+
+            elif k in {'action_low_mask'}:
+                # mask padding
+                seqs = [torch.tensor(vv, device=device, dtype=torch.float) for vv in v]
+                feat[k] = seqs
+            elif k in {'action_low_mask_label'}:
+                # label
+                seqs = torch.tensor([vvv for vv in v for vvv in vv], device=device, dtype=torch.long)
+                feat[k] = seqs
+            elif k in {'subgoal_progress', 'subgoals_completed'}:
+                # auxillary padding
+                seqs = [torch.tensor(vv, device=device, dtype=torch.float) for vv in v]
+                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+                feat[k] = pad_seq
+            elif k in {'action_high', 'action_high_order'}:
+                seqs = [torch.tensor(vv, device=device, dtype=torch.long) for vv in v]
+                pad_seq = pad_sequence(seqs, batch_first=True,
+                                       padding_value=self.vocab['action_high'].word2index('<<pad>>'))
+                feat[k] = pad_seq
+            elif k in {'objnav'}:
+                seqs = [torch.tensor(vv, device=device, dtype=torch.long) for vv in v]
+                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.vocab['objnav'].word2index('<<pad>>'))
+                embed_seq = self.emb_objnav(pad_seq)
+                feat[k] = embed_seq
+            else:
+                # default: tensorize and pad sequence
+                seqs = [torch.tensor(vv, device=device, dtype=torch.float if (
+                            'sub_frames' in k or 'frames' in k or 'orientation' in k) else torch.long) for vv in v]
+                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+                feat[k] = pad_seq
+
+        return feat
 
     def serialize_lang_action(self, feat, action_high_order):
         '''

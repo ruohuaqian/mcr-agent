@@ -14,11 +14,13 @@ SPLITS="$SPLITS_DEFAULT_JSON"
 PREPROCESS=0
 PP_FOLDER=pp
 SAVE_EVERY_EPOCH=1
-MODEL=Interactions.models.model.seq2seq_im_mask_sub
+MODEL=Interactions.models.model.seq2seq_im_mask
 GPU=1
 DOUT="${MCR_ROOT}/exp"
 RESUME=""
 USE_TEMPLATED_GOALS=0
+USE_STREAMING=0
+HUGGINGFACE_ID="byeonghwikim/abp_dataset"
 
 BATCH=16
 EPOCH=20
@@ -66,6 +68,8 @@ while [[ $# -gt 0 ]]; do
     --dout) DOUT="$2"; shift 2;;
     --resume) RESUME="$2"; shift 2;;
     --use_templated_goals) USE_TEMPLATED_GOALS=1; shift;;
+    --use_streaming) USE_STREAMING=1; shift;;
+    --huggingface_id) HUGGINGFACE_ID="$2"; shift 2;;
 
     --batch) BATCH="$2"; shift 2;;
     --epoch) EPOCH="$2"; shift 2;;
@@ -163,11 +167,13 @@ for subgoal in "${subgoals[@]}"; do
     --hstate_dropout "$HSTATE_DROPOUT"
     --attn_dropout "$ATTN_DROPOUT"
     --actor_dropout "$ACTOR_DROPOUT"
+    --huggingface_id "$HUGGINGFACE_ID"
   )
 
   # Add optional flags
   [[ "$PREPROCESS" -eq 1 ]] && CMD+=( --preprocess )
   [[ "$SAVE_EVERY_EPOCH" -eq 1 ]] && CMD+=( --save_every_epoch )
+  [[ "$USE_STREAMING" -eq 1 ]] && CMD+=( --use_streaming )
   [[ "$GPU" -eq 1 ]] && CMD+=( --gpu )
   [[ -n "$RESUME" ]] && CMD+=( --resume "$RESUME" )
   [[ "$USE_TEMPLATED_GOALS" -eq 1 ]] && CMD+=( --use_templated_goals )

@@ -148,7 +148,11 @@ class Module(nn.Module):
 
                 fpred = os.path.join(args.dout, 'valid_seen.debug.preds.json')
                 with open(fpred, 'wt') as f:
-                    json.dump(self.make_debug(p_valid_seen, valid_seen), f, indent=2)
+                    if args.use_streaming:
+                        debug = self.make_debug_streaming(p_valid_seen, valid_seen)
+                    else:
+                        debug = self.make_debug(p_valid_seen, valid_seen)
+                    json.dump(debug, f, indent=2)
                 best_loss['valid_seen'] = total_valid_seen_loss
 
             # new best valid_unseen loss
@@ -168,8 +172,11 @@ class Module(nn.Module):
 
                 fpred = os.path.join(args.dout, 'valid_unseen.debug.preds.json')
                 with open(fpred, 'wt') as f:
-                    json.dump(self.make_debug(p_valid_unseen, valid_unseen), f, indent=2)
-
+                    if args.use_streaming:
+                        debug = self.make_debug_streaming(p_valid_seen, valid_seen)
+                    else:
+                        debug = self.make_debug(p_valid_seen, valid_seen)
+                    json.dump(debug, f, indent=2)
                 best_loss['valid_unseen'] = total_valid_unseen_loss
 
             # save the latest checkpoint

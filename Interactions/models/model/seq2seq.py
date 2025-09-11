@@ -7,8 +7,10 @@ import collections
 import numpy as np
 from torch import nn
 from tensorboardX import SummaryWriter
-from tqdm import trange
-from Interactions.models.model  import constants
+from tqdm import trange,tqdm
+from Interactions.models.model import constants
+from datasets import Dataset
+from huggingface_hub import hf_hub_download
 classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp', 'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
 
 
@@ -56,12 +58,15 @@ class Module(nn.Module):
         train_list = splits['train']
         valid_seen = splits['valid_seen']
         valid_unseen = splits['valid_unseen']
-
-        train = [(s, False) for s in train_list]
-        train = train + [(s, 1) for s in train_list] + [(s, 2) for s in train_list]
-        train = train + [(s, 3) for s in train_list] + [(s, 4) for s in train_list] + [(s, 5) for s in train_list] + [(s, 6) for s in train_list]
-        valid_seen = [(s, False) for s in valid_seen]
-        valid_unseen = [(s, False) for s in valid_unseen]
+        # different list structure
+        if args.use_streamimg:
+            train = train_list
+        else:
+            train = [(s, False) for s in train_list]
+            train = train + [(s, 1) for s in train_list] + [(s, 2) for s in train_list]
+            train = train + [(s, 3) for s in train_list] + [(s, 4) for s in train_list] + [(s, 5) for s in train_list] + [(s, 6) for s in train_list]
+            valid_seen = [(s, False) for s in valid_seen]
+            valid_unseen = [(s, False) for s in valid_unseen]
 
         # debugging: chose a small fraction of the dataset
         if self.args.dataset_fraction > 0:
@@ -73,7 +78,7 @@ class Module(nn.Module):
 
         # debugging: use to check if training loop works without waiting for full epoch
         if self.args.fast_epoch:
-            train = train[-16:]
+            train = train[-16:] if args.use_streaming else train[-112:]
             valid_seen = valid_seen[:1]
             valid_unseen = valid_unseen[:1]
 
@@ -91,6 +96,41 @@ class Module(nn.Module):
         # display dout
         print("Saving to: %s" % self.args.dout)
         best_loss = {'train': 1e10, 'valid_seen': 1e10, 'valid_unseen': 1e10}
+        if use_streaming:
+            file_urls = []
+            BASE_URL = f"https://huggingface.co/datasets/{self.args.huggingface_id}/resolve/main"
+            for task_info in train:
+
+                task_path = task_info['task']
+                repeat_idx = task_info['repeat_idx']
+
+                relative_path = f"{task_path}/pp/ann_{repeat_idx}.json"
+
+                # 构造成完整的、可访问的URL
+                full_url = f"{BASE_URL}/{relative_path}"
+                file_urls.append(full_url)
+
+            train_stream = load_dataset(
+                "json",
+                data_files=file_urls,
+                streaming=True,
+                split="train"  # 对于流式加载，split='train'是固定写法
+            )
+            # dual problem of featurize
+            device = torch.device('cuda') if args.gpu else torch.device('cpu')
+            model.to(device)
+            # param sure?
+            p_collate_fn = partial(collate_fn,
+                                   vocab=vocab,
+                                   model=model,
+                                   device=device)
+
+            augmented_train_stream = train_stream.flat_map(augment_with_swap_color)
+            processed_train_stream = augmented_train_stream.map(p_preprocess_function)
+            processed_train_stream = processed_train_stream.shuffle(buffer_size=1000, seed=args.seed)
+
+            train_loader = DataLoader(processed_train_stream, batch_size=args.batch, collate_fn=p_collate_fn)
+
         train_iter, valid_seen_iter, valid_unseen_iter = 0, 0, 0
         for epoch in trange(0, args.epoch, desc='epoch'):
             m_train = collections.defaultdict(list)
@@ -99,67 +139,128 @@ class Module(nn.Module):
             total_train_loss = list()
             random.shuffle(train) # shuffle every epoch
             c_st=0
-            for batch, feat in self.iterate(train, args.batch):
-                c_st+=1
-                if len(feat['sub_objs']) == 0 :
-                    continue
+            # streaming if-else
+            if args.use_streaming:
+                for i, (feat_batch, batch_metadata) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}")):
+                    c_st += 1
+                    if len(feat_batch['sub_objs']) == 0:
+                        continue
 
-                out = self.forward(feat)
-                preds = self.extract_preds(out, batch, feat)
-                # p_train.update(preds)
-                loss = self.compute_loss(out, batch, feat)
-                # print(loss.keys())
-                for k, v in loss.items():
-                    ln = 'loss_' + k
-                    m_train[ln].append(v.item())
-                    self.summary_writer.add_scalar('train/' + ln, v.item(), train_iter)
+                    out = self.forward(feat_batch)
+                    preds = self.extract_preds(out, batch_metadata, feat_batch)
+                    # p_train.update(preds)
+                    loss = self.compute_loss(out, batch_metadata, feat_batch)
+                    # print(loss.keys())
+                    for k, v in loss.items():
+                        ln = 'loss_' + k
+                        m_train[ln].append(v.item())
+                        self.summary_writer.add_scalar('train/' + ln, v.item(), train_iter)
 
-                # optimizer backward pass
-                optimizer.zero_grad()
-                sum_loss = sum(loss.values())
-                sum_loss.backward()
-                optimizer.step()
+                    # optimizer backward pass
+                    optimizer.zero_grad()
+                    sum_loss = sum(loss.values())
+                    sum_loss.backward()
+                    optimizer.step()
 
-                self.summary_writer.add_scalar('train/loss', sum_loss, train_iter)
-                sum_loss = sum_loss.detach().cpu()
-                total_train_loss.append(float(sum_loss))
-                train_iter += self.args.batch
+                    self.summary_writer.add_scalar('train/loss', sum_loss, train_iter)
+                    sum_loss = sum_loss.detach().cpu()
+                    total_train_loss.append(float(sum_loss))
+                    train_iter += self.args.batch
 
-                if not (c_st % 2628):
+                    if not (c_st % 2628):
+                        fsave = os.path.join(args.dout, f'net_epoch_{epoch}_{c_st}.pth')
 
-                    fsave = os.path.join(args.dout, f'net_epoch_{epoch}_{c_st}.pth')
+                        torch.save({
+                            'metric': {'epoch': epoch, 'c_st': c_st},  # stats,
+                            'model': self.state_dict(),
+                            'optim': optimizer.state_dict(),
+                            'args': self.args,
+                            'vocab': self.vocab,
+                        }, fsave)
 
-                    torch.save({
-                        'metric': {'epoch': epoch, 'c_st':c_st}, #stats,
-                        'model': self.state_dict(),
-                        'optim': optimizer.state_dict(),
-                        'args': self.args,
-                        'vocab': self.vocab,
-                    }, fsave)
+                stats = {'epoch': epoch, }
 
+                # save the latest checkpoint
+                if args.save_every_epoch:
+                    fsave = os.path.join(args.dout, 'net_epoch_%d.pth' % epoch)
+                else:
+                    fsave = os.path.join(args.dout, 'latest.pth')
+                torch.save({
+                    'metric': {'epoch': epoch},  # stats,
+                    'model': self.state_dict(),
+                    'optim': optimizer.state_dict(),
+                    'args': self.args,
+                    'vocab': self.vocab,
+                }, fsave)
 
-            stats = {'epoch': epoch,}
-                  
-
-            # save the latest checkpoint
-            if args.save_every_epoch:
-                fsave = os.path.join(args.dout, 'net_epoch_%d.pth' % epoch)
+                # write stats
+                for split in stats.keys():
+                    if isinstance(stats[split], dict):
+                        for k, v in stats[split].items():
+                            self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
+                pprint.pprint(stats)
             else:
-                fsave = os.path.join(args.dout, 'latest.pth')
-            torch.save({
-                'metric': {'epoch': epoch}, #stats,
-                'model': self.state_dict(),
-                'optim': optimizer.state_dict(),
-                'args': self.args,
-                'vocab': self.vocab,
-            }, fsave)
+                for batch, feat in self.iterate(train, args.batch):
+                    c_st+=1
+                    if len(feat['sub_objs']) == 0 :
+                        continue
 
-            # write stats
-            for split in stats.keys():
-                if isinstance(stats[split], dict):
-                    for k, v in stats[split].items():
-                        self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
-            pprint.pprint(stats)
+                    out = self.forward(feat)
+                    preds = self.extract_preds(out, batch, feat)
+                    # p_train.update(preds)
+                    loss = self.compute_loss(out, batch, feat)
+                    # print(loss.keys())
+                    for k, v in loss.items():
+                        ln = 'loss_' + k
+                        m_train[ln].append(v.item())
+                        self.summary_writer.add_scalar('train/' + ln, v.item(), train_iter)
+
+                    # optimizer backward pass
+                    optimizer.zero_grad()
+                    sum_loss = sum(loss.values())
+                    sum_loss.backward()
+                    optimizer.step()
+
+                    self.summary_writer.add_scalar('train/loss', sum_loss, train_iter)
+                    sum_loss = sum_loss.detach().cpu()
+                    total_train_loss.append(float(sum_loss))
+                    train_iter += self.args.batch
+
+                    if not (c_st % 2628):
+
+                        fsave = os.path.join(args.dout, f'net_epoch_{epoch}_{c_st}.pth')
+
+                        torch.save({
+                            'metric': {'epoch': epoch, 'c_st':c_st}, #stats,
+                            'model': self.state_dict(),
+                            'optim': optimizer.state_dict(),
+                            'args': self.args,
+                            'vocab': self.vocab,
+                        }, fsave)
+
+
+                stats = {'epoch': epoch,}
+
+
+                # save the latest checkpoint
+                if args.save_every_epoch:
+                    fsave = os.path.join(args.dout, 'net_epoch_%d.pth' % epoch)
+                else:
+                    fsave = os.path.join(args.dout, 'latest.pth')
+                torch.save({
+                    'metric': {'epoch': epoch}, #stats,
+                    'model': self.state_dict(),
+                    'optim': optimizer.state_dict(),
+                    'args': self.args,
+                    'vocab': self.vocab,
+                }, fsave)
+
+                # write stats
+                for split in stats.keys():
+                    if isinstance(stats[split], dict):
+                        for k, v in stats[split].items():
+                            self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
+                pprint.pprint(stats)
 
     def run_pred(self, dev, args=None, name='dev', iter=0):
         '''
@@ -209,6 +310,63 @@ class Module(nn.Module):
         single string for task_id and annotation repeat idx
         '''
         return "%s_%s" % (ex['task_id'], str(ex['ann']['repeat_idx']))
+
+
+    def make_debug_streaming(self, preds, data):
+        '''
+        Generates a readable debug output by streaming and processing data in parallel.
+
+        :param preds: Dictionary of predictions keyed by task ID.
+        :param data: The list of task dictionaries from your splits file.
+        :return: A dictionary with debug information.
+        '''
+        print(f"Starting debug data generation for {len(data)} tasks using {num_proc} processes...")
+
+        # 1. Convert your list of tasks into a Hugging Face Dataset in memory
+        #    We need to transpose the list of dicts into a dict of lists
+        task_dict = {
+            'task': [t['task'] for t in data],
+            'repeat_idx': [t['repeat_idx'] for t in data]
+        }
+        task_dataset = Dataset.from_dict(task_dict)
+
+        def _fetch_and_extract_info(task):
+            # Fetch the full JSON from the Hub
+            ex = load_task_json_from_hub(self.args.huggingface_id, task, self.args.pp_folder)
+
+            i = get_task_and_ann_id(ex)
+            # ----------------------------------------------------------------
+
+            # Extract the ground truth information
+            lang_goal = ex['turk_annotations']['anns'][ex['ann']['repeat_idx']]['task_desc']
+            action_low = [a['discrete_action']['action'] for a in ex['plan']['low_actions']]
+
+            return {
+                'id': i,
+                'lang_goal': lang_goal,
+                'action_low': action_low,
+            }
+
+        # 3. Apply the function in parallel using .map()
+        #    This is the "batch reading" step. It will fetch and process 'num_proc' tasks at a time.
+        processed_dataset = task_dataset.map(
+            _fetch_and_extract_info,
+            num_proc=num_proc
+        )
+
+        # 4. Assemble the final debug dictionary
+        #    Now we iterate through the PRE-PROCESSED data, which is very fast.
+        debug = {}
+        for item in tqdm(processed_dataset, desc="Assembling debug output"):
+            task_id = item['id']
+            if task_id in preds:
+                debug[task_id] = {
+                    'lang_goal': item['lang_goal'],
+                    'action_low': item['action_low'],
+                    'p_action_low': preds[task_id]['action_low'].split(),
+                }
+
+        return debug
 
     def make_debug(self, preds, data):
         '''

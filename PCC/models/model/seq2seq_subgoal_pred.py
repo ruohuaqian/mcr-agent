@@ -192,6 +192,63 @@ class Module(nn.Module):
         '''
         return "%s_%s" % (ex['task_id'], str(ex['ann']['repeat_idx']))
 
+    def make_debug_streaming(self, preds, data):
+        '''
+        Generates a readable debug output by streaming and processing data in parallel.
+
+        :param preds: Dictionary of predictions keyed by task ID.
+        :param data: The list of task dictionaries from your splits file.
+        :return: A dictionary with debug information.
+        '''
+        print(f"Starting debug data generation for {len(data)} tasks using {num_proc} processes...")
+
+        # 1. Convert your list of tasks into a Hugging Face Dataset in memory
+        #    We need to transpose the list of dicts into a dict of lists
+        task_dict = {
+            'task': [t['task'] for t in data],
+            'repeat_idx': [t['repeat_idx'] for t in data]
+        }
+        task_dataset = Dataset.from_dict(task_dict)
+
+        def _fetch_and_extract_info(task):
+            # Fetch the full JSON from the Hub
+            ex = load_task_json_from_hub(self.args.huggingface_id, task, self.args.pp_folder)
+
+            i = get_task_and_ann_id(ex)
+            # ----------------------------------------------------------------
+
+            # Extract the ground truth information
+            lang_goal = ex['turk_annotations']['anns'][ex['ann']['repeat_idx']]['task_desc']
+            action_low = [a['discrete_action']['action'] for a in ex['plan']['low_actions']]
+
+            return {
+                'id': i,
+                'lang_goal': lang_goal,
+                'action_low': action_low,
+            }
+
+        # 3. Apply the function in parallel using .map()
+        #    This is the "batch reading" step. It will fetch and process 'num_proc' tasks at a time.
+        processed_dataset = task_dataset.map(
+            _fetch_and_extract_info,
+            num_proc=num_proc
+        )
+
+        # 4. Assemble the final debug dictionary
+        #    Now we iterate through the PRE-PROCESSED data, which is very fast.
+        debug = {}
+        for item in tqdm(processed_dataset, desc="Assembling debug output"):
+            task_id = item['id']
+            if task_id in preds:
+                debug[task_id] = {
+                    'lang_goal': item['lang_goal'],
+                    'action_low': item['action_low'],
+                    'p_action_low': preds[task_id]['action_low'].split(),
+                }
+
+        return debug
+
+
     def make_debug(self, preds, data):
         '''
         readable output generator for debugging
