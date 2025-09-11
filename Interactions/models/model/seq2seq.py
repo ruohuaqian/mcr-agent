@@ -96,7 +96,7 @@ class Module(nn.Module):
         # display dout
         print("Saving to: %s" % self.args.dout)
         best_loss = {'train': 1e10, 'valid_seen': 1e10, 'valid_unseen': 1e10}
-        if use_streaming:
+        if args.use_streaming:
             file_urls = []
             BASE_URL = f"https://huggingface.co/datasets/{self.args.huggingface_id}/resolve/main"
             for task_info in train:
