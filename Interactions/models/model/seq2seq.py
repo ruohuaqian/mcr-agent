@@ -126,12 +126,17 @@ class Module(nn.Module):
 
             # ...
             train_loader = DataLoader(
-                processed_train_stream,
-                batch_size=args.batch,
-                collate_fn=p_collate_fn,
-                prefetch_factor = 2,  # <-- 推荐值：让数据加载更流畅
-                num_workers = 0
-            )
+                    dataset,
+                    batch_size=BATCH_SIZE,
+                    shuffle=True,
+                    collate_fn=collate_fn,
+                    num_workers=2,
+                    pin_memory=True,
+                    persistent_workers=True,
+                    prefetch_factor=2,
+                    drop_last=False,
+                )
+
         else:
             print("Using local file pipeline...")
 
