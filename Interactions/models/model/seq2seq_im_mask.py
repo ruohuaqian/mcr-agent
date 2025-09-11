@@ -12,6 +12,7 @@ from Interactions.models.utils.metric import compute_f1, compute_exact
 from gen.utils.image_util import decompress_mask
 from datasets import load_dataset
 from huggingface_hub import hf_hub_download
+import json
 
 
 from PIL import Image
