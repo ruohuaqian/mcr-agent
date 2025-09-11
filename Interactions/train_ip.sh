@@ -9,7 +9,7 @@ SPLITS_DEFAULT_JSON=${DRIVE_ROOT}/data/splits/oct21.json
 
 # ========= default hyperparameters (aligned with argparse) =========
 SEED=123
-DATA="$DATA_DEFAULT_JSON"
+DATA=
 SPLITS="$SPLITS_DEFAULT_JSON"
 PREPROCESS=0
 PP_FOLDER=pp
@@ -57,7 +57,6 @@ DATASET_FRACTION=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --seed) SEED="$2"; shift 2;;
-    --data) DATA="$2"; shift 2;;
     --splits) SPLITS="$2"; shift 2;;
     --preprocess) PREPROCESS=1; shift;;
     --pp_folder) PP_FOLDER="$2"; shift 2;;
@@ -116,8 +115,7 @@ if [[ ! -d "$DATA" ]]; then
     DATA="${DRIVE_ROOT}/data/json_feat_2.1.0"
     echo "[INFO] Using Google Drive dataset: $DATA"
   else
-    DATA="$DATA_DEFAULT_JSON"
-    echo "[INFO] Using local dataset: $DATA"
+    echo "[INFO] Using huggingface streaming"
   fi
 fi
 
@@ -143,7 +141,7 @@ for subgoal in "${subgoals[@]}"; do
   # Assemble training command
   CMD=( python models/train/train_seq2seq_stream.py
     --seed "$SEED"
-    --data "$DATA"
+    --splits "$SPLITS"
     --splits "$SPLITS"
     --pp_folder "$PP_FOLDER"
     --model "$MODEL"
