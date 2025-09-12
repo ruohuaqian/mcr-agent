@@ -187,15 +187,6 @@ echo "[INFO] HF_ID    = $HUGGINGFACE_ID"
 echo "[INFO] STREAMING= $USE_STREAMING"
 echo "[INFO] CMD: ${CMD[*]}"
 
-# 检查是否安装了必要的库
-if [[ "$USE_STREAMING" -eq 1 ]]; then
-  echo "[INFO] Checking required packages for streaming..."
-  pip list | grep -E "datasets|huggingface-hub" || {
-    echo "[INFO] Installing streaming dependencies..."
-    pip install datasets huggingface-hub
-  }
-fi
-
 # 执行训练命令
 "${CMD[@]}"
 

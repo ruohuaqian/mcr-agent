@@ -3,7 +3,6 @@ import torch
 import pprint
 import json
 from vocab import Vocab
-from data.preprocess import Dataset
 from importlib import import_module
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from OEM.models.utils.helper_utils import optimizer_to
@@ -26,7 +25,16 @@ if __name__ == '__main__':
     parser.add_argument('--model', help='model to use', default='seq2seq_im_mask')
     parser.add_argument('--gpu', help='use gpu', action='store_true')
     parser.add_argument('--dout', help='where to save model', default='exp/model:{model}')
-    parser.add_argument('--resume', help='load a checkpoint')
+
+    # ===== 新增：微调相关参数 =====
+    parser.add_argument('--resume', help='resume training from a checkpoint')  # 续训：加载模型+优化器等
+    parser.add_argument('--finetune_from', help='initialize weights from a checkpoint (fine-tune, reset optimizer)')
+    parser.add_argument('--freeze', help='comma-separated prefixes to freeze (e.g., "encoder,visual_backbone,embeddings")',
+                        default='')
+    parser.add_argument('--reset_optim', help='when used with --resume, ignore optimizer/scheduler states',
+                        action='store_true')
+    # ============================
+
     parser.add_argument('--use_templated_goals',
                         help='use templated goals instead of human-annotated goal descriptions (only available for train set)',
                         action='store_true')
@@ -100,18 +108,69 @@ if __name__ == '__main__':
 
     # load model
     M = import_module(args.model)
+
+    model, optimizer = None, None
+
+    # ====== 加载逻辑：区分 续训 vs 微调 vs 全新训练 ======
     if args.resume:
-        print("Loading: " + args.resume)
+        print("Resuming from checkpoint (model + optimizer):", args.resume)
         model, optimizer = M.Module.load(args.resume)
+        if args.reset_optim:
+            print("[fine-tune mode on resume] resetting optimizer/scheduler states.")
+            optimizer = None  # 重新创建优化器（由 run_train_stream 内部或后续逻辑完成）
+
+    elif args.finetune_from:
+        print("Finetune from weights:", args.finetune_from)
+        # 1) 构建新模型（使用当前超参/配置）
+        model = M.Module(args, vocab)
+
+        # 2) 仅加载权重（忽略旧优化器/调度器等状态），允许部分层尺寸不匹配
+        ckpt = torch.load(args.finetune_from, map_location='cpu')
+        # 兼容多种 ckpt 结构
+        state = ckpt.get('state_dict', ckpt.get('model', ckpt))
+        # 去除可能的 'module.' 前缀（DataParallel 保存）
+        cleaned = {}
+        for k, v in state.items():
+            if k.startswith('module.'):
+                cleaned[k[len('module.'):]] = v
+            else:
+                cleaned[k] = v
+        # 丢弃形状不匹配的键
+        cur = model.state_dict()
+        drop = [k for k, v in cleaned.items() if k in cur and cur[k].shape != v.shape]
+        for k in drop:
+            cleaned.pop(k)
+        missing, unexpected = model.load_state_dict(cleaned, strict=False)
+        print(f"[finetune] loaded keys: {len(cleaned)} | dropped (mismatch): {len(drop)} | "
+              f"missing: {len(missing)} | unexpected: {len(unexpected)}")
+
+        # 3) 可选：冻结部分模块（按前缀匹配）
+        if args.freeze.strip():
+            prefixes = [p.strip() for p in args.freeze.split(',') if p.strip()]
+            n_all, n_frozen = 0, 0
+            for name, p in model.named_parameters():
+                n_all += 1
+                if any(name.startswith(pref) for pref in prefixes):
+                    p.requires_grad = False
+                    n_frozen += 1
+            print(f"[finetune] frozen params: {n_frozen}/{n_all} (prefixes={prefixes})")
+
+        optimizer = None  # 微调：重置优化器/调度器
+
     else:
+        print("Training from scratch.")
         model = M.Module(args, vocab)
         optimizer = None
+    # =====================================================
 
     # to gpu
     if args.gpu:
-        model = model.to(torch.device('cuda'))
-        if not optimizer is None:
-            optimizer_to(optimizer, torch.device('cuda'))
+        device = torch.device('cuda')
+        model = model.to(device)
+        if optimizer is not None:
+            optimizer_to(optimizer, device)
 
     # start train loop
+    # - 若 optimizer=None，由模型内部/训练函数创建新的优化器（推荐微调时如此）
+    # - 若使用 --resume 且未 --reset_optim，则沿用旧优化器继续训练
     model.run_train_stream(splits, optimizer=optimizer)
