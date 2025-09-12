@@ -149,6 +149,7 @@ class Module(nn.Module):
                     for k, v in stats[split].items():
                         self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
             pprint.pprint(stats)
+
     def run_train_stream(self, splits, optimizer=None):
         '''
         流式训练循环 - 导航版本
@@ -191,7 +192,7 @@ class Module(nn.Module):
             train_stream = fraction_stream(train_stream, self.args.dataset_fraction)
 
         # 初始化优化器
-        optimizer = optimizer or torch.optim.Adam(self.model.parameters(), lr=args.lr)
+        optimizer = optimizer or torch.optim.Adam(self.parameters(), lr=args.lr)
         self.summary_writer = SummaryWriter(log_dir=args.dout)
 
         # 保存配置
@@ -203,7 +204,7 @@ class Module(nn.Module):
 
         for epoch in trange(0, args.epoch, desc='epoch'):
             m_train = collections.defaultdict(list)
-            self.model.train()
+            self.train()
             self.adjust_lr(optimizer, args.lr, epoch, args.decay_epoch)
             total_train_loss = []
 
@@ -219,9 +220,9 @@ class Module(nn.Module):
                 try:
                     feat = self.streaming_featurize(batch)
 
-                    out = self.model.forward(feat)
-                    preds = self.model.extract_preds(out, batch, feat)
-                    loss = self.model.compute_loss(out, batch, feat)
+                    out = self.forward(feat)
+                    preds = self.extract_preds(out, batch, feat)
+                    loss = self.compute_loss(out, batch, feat)
 
                     # 记录损失
                     for k, v in loss.items():
@@ -610,7 +611,7 @@ class Module(nn.Module):
 
         checkpoint = {
             'metric': {'epoch': epoch, 'batch_count': batch_count},
-            'model': self.model.state_dict(),
+            'model': self.state_dict(),
             'optim': optimizer.state_dict(),
             'args': self.args,
             'vocab': self.vocab,
