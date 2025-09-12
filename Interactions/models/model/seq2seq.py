@@ -13,7 +13,6 @@ from torch.utils.data import DataLoader
 from datasets import Dataset, DatasetDict
 from huggingface_hub import hf_hub_download
 from functools import partial
-from Interactions.models.model.subgoal_streaming_trainer import SubgoalStreamingTrainer
 
 classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp',
                                      'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
@@ -166,11 +165,176 @@ class Module(nn.Module):
                         self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
             pprint.pprint(stats)
 
-    def run_train_stream(self, splits, optimizer, args, vocab):
-        # 创建流式训练器
-        trainer = SubgoalStreamingTrainer(splits, optimizer, args, vocab)
-        # 开始训练
-        trainer.run_train(splits)
+    def run_train_stream(self, splits, args=None, optimizer=None):
+        '''
+        流式训练方法
+        '''
+        args = args or self.args
+
+        # 创建流式数据集
+        train_stream = self.create_streaming_dataset(
+            splits['train'],
+            augment=True
+        )
+        valid_seen_stream = self.create_streaming_dataset(splits['valid_seen'])
+        valid_unseen_stream = self.create_streaming_dataset(splits['valid_unseen'])
+        # 调试模式处理
+        if args.fast_epoch:
+            # 对于流式数据，我们需要在迭代时限制数量
+            def limited_stream(stream, limit):
+                count = 0
+                for item in stream:
+                    if count >= limit:
+                        break
+                    yield item
+                    count += 1
+
+            train_stream = limited_stream(train_stream, 16)
+            valid_seen_stream = limited_stream(valid_seen_stream, 1)
+            valid_unseen_stream = limited_stream(valid_unseen_stream, 1)
+        # 初始化优化器
+        optimizer = optimizer or torch.optim.Adam(self.parameters(), lr=args.lr)
+        self.summary_writer = SummaryWriter(log_dir=args.dout)
+        # 保存配置
+        with open(os.path.join(args.dout, 'config.json'), 'wt') as f:
+            json.dump(vars(args), f, indent=2)
+
+        print("Saving to: %s" % args.dout)
+        train_iter = 0
+
+        # 训练循环
+        for epoch in range(args.epoch):
+            m_train = collections.defaultdict(list)
+            self.train()
+            self.adjust_lr(optimizer, args.lr, epoch, args.decay_epoch)
+            total_train_loss = []
+            batch_count = 0
+            for batch in self.streaming_iterate(train_stream, args.batch):
+                feat = self.streaming_featurize(batch)
+
+                if len(feat['sub_objs']) == 0:
+                    continue
+
+                out = self.forward(feat)
+                preds = self.extract_preds(out, batch, feat)
+                loss = self.compute_loss(out, batch, feat)
+
+                # 记录损失
+                for k, v in loss.items():
+                    ln = 'loss_' + k
+                    m_train[ln].append(v.item())
+                    self.summary_writer.add_scalar('train/' + ln, v.item(), train_iter)
+
+                optimizer.zero_grad()
+                sum_loss = sum(loss.values())
+                sum_loss.backward()
+                optimizer.step()
+
+                self.summary_writer.add_scalar('train/loss', sum_loss, train_iter)
+                total_train_loss.append(float(sum_loss.detach().cpu()))
+                train_iter += len(batch)
+                batch_count += 1
+
+                # 定期保存检查点
+                if batch_count % 2628 == 0:
+                    self.save_checkpoint(epoch, batch_count, optimizer, args.dout)
+
+            # 保存epoch检查点
+            self.save_checkpoint(epoch, 0, optimizer, args.dout, is_epoch_end=True)
+
+    def create_streaming_dataset(self, task_list, augment=False):
+        '''
+        创建流式数据集
+        '''
+        # 实现流式数据加载逻辑
+        for task in task_list:
+            if augment:
+                for swapColor in range(7):
+                    yield self.load_streaming_task(task, swapColor)
+            else:
+                yield self.load_streaming_task(task, False)
+
+    def load_streaming_task(self, task_path, swapColor):
+        '''
+        流式加载单个任务数据
+        '''
+        try:
+            # 加载JSON数据
+            json_filename = f"{task_path}/pp/ann_0.json"  # 假设repeat_idx=0
+            json_url = hf_hub_url(
+                repo_id=self.args.huggingface_id,
+                filename=json_filename,
+                repo_type="dataset"
+            )
+
+            json_response = requests.get(json_url, timeout=30)
+            ex = json.loads(json_response.content.decode('utf-8'))
+
+            # 加载图像特征
+            if not swapColor:
+                pt_filename = f"train/{task_path}/{self.feat_pt}"
+            elif swapColor in [1, 2]:
+                pt_filename = f"train/{task_path}/feat_conv_colorSwap{swapColor}_panoramic.pt"
+            else:
+                pt_filename = f"train/{task_path}/feat_conv_onlyAutoAug{swapColor - 2}_panoramic.pt"
+
+            pt_url = hf_hub_url(
+                repo_id=self.args.huggingface_id,
+                filename=pt_filename,
+                repo_type="dataset"
+            )
+
+            pt_response = requests.get(pt_url, timeout=30)
+            with io.BytesIO(pt_response.content) as buffer:
+                im = torch.load(buffer, map_location='cpu')
+
+            return {
+                'ex': ex,
+                'im': im,
+                'task_path': task_path,
+                'swapColor': swapColor
+            }
+
+        except Exception as e:
+            print(f"Error loading task {task_path}: {e}")
+            return None
+
+    def save_checkpoint(self, epoch, batch_count, optimizer, dout_path, is_epoch_end=False):
+        '''
+        保存检查点
+        '''
+        if is_epoch_end:
+            filename = f'net_epoch_{epoch}.pth'
+        else:
+            filename = f'net_epoch_{epoch}_{batch_count}.pth'
+
+        checkpoint = {
+            'metric': {'epoch': epoch, 'batch_count': batch_count},
+            'model': self.state_dict(),
+            'optim': optimizer.state_dict(),
+            'args': self.args,
+            'vocab': self.vocab,
+        }
+
+        torch.save(checkpoint, os.path.join(dout_path, filename))
+
+    def streaming_iterate(self, data_stream, batch_size):
+        '''
+        流式批处理生成器
+        '''
+        current_batch = []
+        for data_item in data_stream:
+            if data_item is None:
+                continue
+
+            current_batch.append(data_item)
+
+            if len(current_batch) >= batch_size:
+                yield current_batch
+                current_batch = []
+
+        if current_batch:
+            yield current_batch
 
     def run_pred(self, dev, args=None, name='dev', iter=0):
         '''
