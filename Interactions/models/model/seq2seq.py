@@ -188,7 +188,7 @@ class Module(nn.Module):
         valid_unseen_stream = self.create_streaming_dataset(splits['valid_unseen'])
         # 调试模式处理
         if args.fast_epoch:
-            # 对于流式数据，我们需要在迭代时限制数量
+            # 对于流式数据，我们需要在迭代时limit num
             def limited_stream(stream, limit):
                 count = 0
                 for item in stream:
@@ -243,12 +243,8 @@ class Module(nn.Module):
                 train_iter += len(batch)
                 batch_count += 1
 
-                # 定期保存检查点
-                if batch_count % 2628 == 0:
-                    self.save_checkpoint(epoch, batch_count, optimizer, args.dout)
-
             # 保存epoch检查点
-            self.save_checkpoint(epoch, 0, optimizer, args.dout, is_epoch_end=True)
+            self.save_checkpoint(epoch, 0, optimizer, args.dout)
 
     def create_streaming_dataset(self, task_list, augment=False):
         '''
@@ -276,7 +272,11 @@ class Module(nn.Module):
                 repo_type="dataset"
             )
 
-            json_response = requests.get(json_url, timeout=30)
+            json_response = requests.get(
+                json_url,
+                timeout=120,
+                stream=False
+            )
             ex = json.loads(json_response.content.decode('utf-8'))
 
             # 加载图像特征
@@ -293,7 +293,11 @@ class Module(nn.Module):
                 repo_type="dataset"
             )
 
-            pt_response = requests.get(pt_url, timeout=30)
+            pt_response = requests.get(
+                pt_url,
+                timeout=300,
+                stream=True
+            )
             with io.BytesIO(pt_response.content) as buffer:
                 im = torch.load(buffer, map_location='cpu')
 
@@ -309,14 +313,14 @@ class Module(nn.Module):
             print(f"Error loading task {task_path}: {e}")
             return None
 
-    def save_checkpoint(self, epoch, batch_count, optimizer, dout_path, is_epoch_end=False):
+    def save_checkpoint(self, epoch, batch_count, optimizer, dout_path):
         '''
         保存检查点
         '''
-        if is_epoch_end:
+        if self.args.save_each_epoch:
             filename = f'net_epoch_{epoch}.pth'
         else:
-            filename = f'net_epoch_{epoch}_{batch_count}.pth'
+            filename = f'latest.pth'
 
         checkpoint = {
             'metric': {'epoch': epoch, 'batch_count': batch_count},

@@ -37,7 +37,11 @@ class ALFREDStreamingDataset:
                     )
 
                     # 下载 JSON
-                    json_response = requests.get(json_url)
+                    json_response = requests.get(
+                        json_url,
+                        timeout=120,
+                        stream=False
+                        )
                     if json_response.status_code != 200:
                         continue
                     ex = json.loads(json_response.content.decode('utf-8'))
@@ -56,7 +60,11 @@ class ALFREDStreamingDataset:
                         repo_type="dataset"
                     )
 
-                    pt_response = requests.get(pt_url)
+                    pt_response = requests.get(
+                                    pt_url,
+                                    timeout=300,
+                                    stream=True
+                                )
                     if pt_response.status_code != 200:
                         continue
 

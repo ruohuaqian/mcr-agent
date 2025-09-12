@@ -85,7 +85,11 @@ class StreamingEvalTask(Eval):
             repo_type="dataset"
         )
 
-        json_response = requests.get(json_url, timeout=30)
+        json_response = requests.get(
+                json_url,
+                timeout=120,
+                stream=False
+            )
         if json_response.status_code != 200:
             raise Exception(f"Failed to load JSON: {json_url}")
 
@@ -119,7 +123,11 @@ class StreamingEvalTask(Eval):
                 repo_type="dataset"
             )
 
-            pt_response = requests.get(pt_url, timeout=30)
+            pt_response = requests.get(
+                pt_url,
+                timeout=300,
+                stream=True
+            )
             if pt_response.status_code == 200:
                 with io.BytesIO(pt_response.content) as buffer:
                     feat_data[swapColor] = torch.load(buffer, map_location='cpu')

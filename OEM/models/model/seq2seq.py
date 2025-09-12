@@ -254,11 +254,6 @@ class Module(nn.Module):
 
             # 保存检查点
             stats = {'epoch': epoch}
-            if args.save_every_epoch:
-                fsave = os.path.join(args.dout, 'net_epoch_%d.pth' % epoch)
-            else:
-                fsave = os.path.join(args.dout, 'latest.pth')
-
             self.save_checkpoint(epoch, batch_count, optimizer, args.dout)
 
             # 记录统计信息
@@ -300,7 +295,12 @@ class Module(nn.Module):
                 repo_type="dataset"
             )
 
-            json_response = requests.get(json_url, timeout=30)
+            json_response = requests.get(
+                json_url,
+                timeout=120,
+                stream=False
+            )
+            json_response.raise_for_status()  # 抛出HTTP错误
             if json_response.status_code != 200:
                 print(f"Failed to load JSON: {json_url} (HTTP {json_response.status_code})")
                 return None
@@ -315,7 +315,12 @@ class Module(nn.Module):
                 repo_type="dataset"
             )
 
-            pt_response = requests.get(pt_url, timeout=30)
+            pt_response = requests.get(
+                pt_url,
+                timeout=300,
+                stream=True
+            )
+            pt_response.raise_for_status()
             if pt_response.status_code != 200:
                 print(f"Failed to load PT: {pt_url} (HTTP {pt_response.status_code})")
                 return None
