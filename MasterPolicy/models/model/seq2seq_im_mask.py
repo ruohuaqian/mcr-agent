@@ -721,34 +721,6 @@ class Module(Base):
 
     def forward(self, feat, max_decode=300):
 
-        # 1. 编码目标指令 (goal)
-        # 调用 self.encode_lang 来获取编码后的目标指令和上下文向量
-        cont_lang_goal, enc_lang_goal = self.encode_lang(feat)
-        # 创建解码器需要的初始隐藏状态
-        state_0_goal = cont_lang_goal, torch.zeros_like(cont_lang_goal)
-
-        # 2. 编码分步指令 (instr)
-        # 注意：您的原始代码中 instr 相关的编码器被注释掉了，这里我们假设它们是存在的
-        # 您需要确保在 __init__ 中有 self.enc_instr 和 self.enc_att_instr
-        # 我们需要一个类似于 encode_lang 的函数来处理 lang_instr
-        # 这里我们直接在 forward 中实现它
-
-        # 从 feat 中解包 lang_instr 数据
-        lang_instr_seqs = feat['lang_instr']['seq']
-        num_instr = feat['lang_instr']['len']
-
-        # 将 list of tensors 变回 packed sequence 以输入 LSTM
-        packed_lang_instr = pack_padded_sequence(
-            pad_sequence(lang_instr_seqs, batch_first=True),
-            num_instr,
-            batch_first=True,
-            enforce_sorted=False
-        )
-
-        cont_lang_instr, enc_lang_instr = self.dec.encode_lang_instr(feat['lang_instr']['seq'])
-        state_0_instr = cont_lang_instr, torch.zeros_like(cont_lang_instr)
-
-
         frames = self.vis_dropout(feat['frames'])
         if self.panoramic:
             frames_left = self.vis_dropout(feat['frames_left'])
@@ -756,12 +728,11 @@ class Module(Base):
             frames_down = self.vis_dropout(feat['frames_down'])
             frames_right = self.vis_dropout(feat['frames_right'])
             res = self.dec(feat['objnav'], feat['lang_instr']['seq'], frames, frames_left, frames_up, frames_down,
-                           frames_right, max_decode=max_decode, gold=feat['action_low'])
+                           frames_right, max_decode=max_decode,
+                           gold=feat['action_low'])  # , state_0_instr=state_0_instr)
         else:
-            # 现在这些变量都是可用的了
             res = self.dec(enc_lang_goal, enc_lang_instr, frames, max_decode=max_decode, gold=feat['action_low'],
                            state_0_goal=state_0_goal, state_0_instr=state_0_instr)
-
         feat.update(res)
         return feat
 
