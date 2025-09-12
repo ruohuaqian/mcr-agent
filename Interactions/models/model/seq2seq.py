@@ -168,7 +168,7 @@ class Module(nn.Module):
                         self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
             pprint.pprint(stats)
     def setup_hf_auth(self):
-        # 方法1: 使用环境变量
+        # use environ path
         if os.environ.get('HF_TOKEN'):
             login(token=os.environ.get('HF_TOKEN'))
 

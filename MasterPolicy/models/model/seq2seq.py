@@ -12,6 +12,7 @@ from tensorboardX import SummaryWriter
 from tqdm import trange
 from MasterPolicy.models.model import constants
 from huggingface_hub import hf_hub_url
+from huggingface_hub import login
 classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp', 'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
 
 
@@ -152,11 +153,16 @@ class Module(nn.Module):
                     for k, v in stats[split].items():
                         self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
             pprint.pprint(stats)
+    def setup_hf_auth(self):
+        # use environ path
+        if os.environ.get('HF_TOKEN'):
+            login(token=os.environ.get('HF_TOKEN'))
 
     def run_train_stream(self, splits, optimizer=None):
         '''
         流式训练循环 - 导航版本
         '''
+        self.setup_hf_auth()
         args = self.args
 
         # 创建流式数据集
