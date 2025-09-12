@@ -1,5 +1,7 @@
 import os
 import random
+import requests
+import io
 import json
 import torch
 import pprint
