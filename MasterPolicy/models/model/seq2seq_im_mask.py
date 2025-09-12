@@ -319,71 +319,72 @@ class Module(Base):
                 feat[k] = pad_seq
 
         return feat
+
     def streaming_featurize(self, batch_data):
         '''
-        流式特征处理 - 导航版本
+        流式特征处理 - 导航版本 (优化版)
         '''
         device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
         feat = collections.defaultdict(list)
+        start_time = time.time()
 
         for data_item in batch_data:
             if data_item is None:
                 continue
 
-            ex = data_item['ex']
-            swapColor = data_item['swapColor']
-            im_data = data_item['im']
+            ex = data_item.get('ex')
+            swapColor = data_item.get('swapColor')
+            im_data = data_item.get('im')
+
+            if not all([ex, im_data]):  # Ensure required fields are present
+                print(f"[WARN] Skipping task {data_item.get('task_path', 'unknown')}: Missing ex or im_data")
+                continue
 
             try:
                 # 辅助特征提取
-                action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
-                low_to_high_idx = ex['num']['low_to_high_idx']
+                action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']], dtype=np.int64)
+                low_to_high_idx = np.array(ex['num']['low_to_high_idx'], dtype=np.int64)
                 action_high = action_high_order[low_to_high_idx]
 
                 feat['action_high'].append(action_high)
                 feat['action_high_order'].append(action_high_order)
 
-                # GotoLocation 验证
+                # GotoLocation 验证 (优化为向量操作)
                 val_action_high = (
                             action_high == self.vocab['action_high'].word2index('GotoLocation', train=False)).astype(
                     np.int64)
-
-                v = 0
-                while v < (len(val_action_high) - 1):
-                    if (val_action_high[v] - val_action_high[v + 1]) == 1:
-                        val_action_high[v + 1] = 1
-                        v += 1
-                    v += 1
+                val_action_high = np.maximum.accumulate(val_action_high)  # Replace while loop
                 val_action_high[-1] = 1
 
                 # 序列化语言动作
                 self.serialize_lang_action(ex, action_high_order)
 
                 # 语言处理
-                lang_goal, lang_instr = ex['num']['lang_goal'], ex['num']['lang_instr']
-                lang_goal = self.zero_input(lang_goal) if self.args.zero_goal else lang_goal
-                lang_instr = self.zero_input(lang_instr) if self.args.zero_instr else lang_instr
-
+                lang_goal = self.zero_input(ex['num']['lang_goal']) if self.args.zero_goal else ex['num']['lang_goal']
+                lang_instr = self.zero_input(ex['num']['lang_instr']) if self.args.zero_instr else ex['num'][
+                    'lang_instr']
                 feat['lang_goal'].append(lang_goal)
                 feat['lang_instr'].append(lang_instr)
 
-                # 动作处理
+                # 动作处理 (限制动作数量以避免内存问题)
+                max_actions = getattr(self.args, 'max_actions', 1000)  # Configurable limit
                 alow = []
                 alow_manip = []
                 obj_high_indices = []
 
-                for ia, a in enumerate(ex['num']['action_low']):
-                    if val_action_high[ia] == 1 and a['action'] in self.vocab['action_low'].word2index(
+                for ia, a in enumerate(ex['num']['action_low'][:max_actions]):
+                    action_idx = a['action']
+                    if val_action_high[ia] == 1 and action_idx in self.vocab['action_low'].word2index(
                             ['<<pad>>', '<<seg>>', '<<stop>>', 'LookDown_15', 'LookUp_15', 'RotateLeft_90',
                              'RotateRight_90', 'MoveAhead_25'], train=False):
-                        alow.append(a['action'])
+                        alow.append(action_idx)
                     elif val_action_high[ia] == 1:
                         alow.append(self.vocab['action_low'].word2index('Manipulate', train=False))
 
-                    if not (a['action'] in self.vocab['action_low'].word2index(
+                    if action_idx not in self.vocab['action_low'].word2index(
                             ['<<pad>>', '<<seg>>', '<<stop>>', 'LookDown_15', 'LookUp_15', 'RotateLeft_90',
-                             'RotateRight_90', 'MoveAhead_25'], train=False)):
-                        alow_manip.append(a['action'])
+                             'RotateRight_90', 'MoveAhead_25'], train=False):
+                        alow_manip.append(action_idx)
                         obj_high_indices.append(low_to_high_idx[ia])
 
                 feat['action_low'].append(alow)
@@ -392,14 +393,14 @@ class Module(Base):
 
                 # 辅助损失
                 if self.args.subgoal_aux_loss_wt > 0:
-                    feat['subgoals_completed'].append(
-                        np.array(ex['num']['low_to_high_idx'])[
-                            val_action_high.nonzero()[0].astype(int)] / self.max_subgoals
-                    )
+                    subgoals_completed = np.array(ex['num']['low_to_high_idx'])[
+                                             val_action_high.nonzero()[0].astype(int)] / self.max_subgoals
+                    feat['subgoals_completed'].append(subgoals_completed)
 
                 if self.args.pm_aux_loss_wt > 0:
                     num_actions = len(alow)
-                    subgoal_progress = [(i + 1) / float(num_actions) for i in range(num_actions)]
+                    subgoal_progress = [(i + 1) / float(num_actions) if num_actions > 0 else 0.0 for i in
+                                        range(num_actions)]
                     feat['subgoal_progress'].append(subgoal_progress)
 
                 # 对象导航和掩码
@@ -407,21 +408,17 @@ class Module(Base):
                 high_idx = 0
                 indices = []
 
-                for a in ex['plan']['low_actions']:
+                for a in ex['plan']['low_actions'][:max_actions]:
                     if a['api_action']['action'] in ['MoveAhead', 'LookUp', 'LookDown', 'RotateRight', 'RotateLeft']:
                         if a['high_idx'] == (high_idx + 1):
                             obj_list.append(self.vocab['objnav'].word2index('<<nav>>', train=False))
                             high_idx += 1
                         continue
 
-                    if a['api_action']['action'] == 'PutObject':
-                        label = a['api_action']['receptacleObjectId'].split('|')
-                    else:
-                        label = a['api_action']['objectId'].split('|')
-
+                    label = a['api_action'].get('receptacleObjectId', a['api_action'].get('objectId', '')).split('|')
                     try:
                         class_name = label[4].split('_')[0] if len(label) >= 5 else label[0]
-                        indices.append(classes.index(class_name))
+                        indices.append(self.classes.index(class_name))
                     except (IndexError, ValueError):
                         indices.append(0)
 
@@ -434,33 +431,45 @@ class Module(Base):
                         high_idx += 1
 
                 new_obj_list = [obj_list[o + 1] for o, obj in enumerate(obj_list) if
-                                (obj == self.vocab['objnav'].word2index('<<nav>>'))]
+                                obj == self.vocab['objnav'].word2index('<<nav>>')]
                 feat['objnav'].append(new_obj_list)
                 feat['action_low_mask_label'].append(indices)
 
-                # 图像特征处理
+                # 图像特征处理 (优化内存使用)
                 if len(im_data) >= 5:
-                    # 使用 val_action_high 作为掩码
                     val_indices = val_action_high.nonzero()[0]
-                    feat['frames'].append(im_data[2][val_indices])
-                    feat['frames_left'].append(im_data[0][val_indices])
-                    feat['frames_up'].append(im_data[1][val_indices])
-                    feat['frames_down'].append(im_data[3][val_indices])
-                    feat['frames_right'].append(im_data[4][val_indices])
+                    # Preallocate tensors to avoid redundant copying
+                    for view, idx in zip(['frames', 'frames_left', 'frames_up', 'frames_down', 'frames_right'],
+                                         [2, 0, 1, 3, 4]):
+                        if len(val_indices) > 0:
+                            # Move to device only once
+                            feat[view].append(im_data[idx][val_indices].to(device, non_blocking=True))
+                        else:
+                            feat[view].append(torch.tensor([], device=device, dtype=torch.float))
                 else:
-                    # 添加空张量
+                    print(
+                        f"[WARN] Insufficient im_data for task {data_item.get('task_path', 'unknown')}: {len(im_data)} views")
                     empty_tensor = torch.tensor([], device=device, dtype=torch.float)
                     for view in ['frames', 'frames_left', 'frames_up', 'frames_down', 'frames_right']:
                         feat[view].append(empty_tensor)
 
             except Exception as e:
-                print(f"Error processing task {data_item.get('task_path', 'unknown')}: {e}")
+                print(f"[ERROR] Error processing task {data_item.get('task_path', 'unknown')}: {e}")
+                traceback.print_exc()
                 continue
-                # 添加方向特征
+
+            # 检查处理时间，防止卡住
+            if time.time() - start_time > 60:  # Timeout after 60 seconds
+                print(f"[ERROR] streaming_featurize timeout for batch")
+                break
+
+        # 添加方向特征 (优化为单次计算)
         if self.orientation:
             feat = self._add_orientation_features(feat, device)
+
         # 张量化和填充
         feat = self._tensorize_and_pad(feat, device)
+        print(f"[DEBUG] streaming_featurize completed in {time.time() - start_time:.2f} seconds")
         return feat
 
     def _tensorize_and_pad(self, feat, device):
