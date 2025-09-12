@@ -113,8 +113,6 @@ if __name__ == '__main__':
         model = model.to(torch.device('cuda'))
         if not optimizer is None:
             optimizer_to(optimizer, torch.device('cuda'))
-    # 加载数据分割
-    splits = load_splits(args.splits)
 
     # 开始训练
     model.run_train_stream(splits)
