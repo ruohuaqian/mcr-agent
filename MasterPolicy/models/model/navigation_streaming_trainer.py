@@ -6,7 +6,7 @@ import json
 import collections
 import numpy as np
 from tqdm import trange
-import pytorch
+from torch import nn
 
 
 class NavigationStreamingTrainer(nn.Module):
