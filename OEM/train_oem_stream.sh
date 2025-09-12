@@ -1,28 +1,47 @@
 #!/usr/bin/env bash
+#
+# Description:
+#   This script serves as a unified launcher for training the MCR-Agent's OEM model.
+#   It supports both the traditional local file pipeline and the new Hugging Face
+#   streaming pipeline, controlled by the --use_streaming / --no-streaming flags.
+#
+# Usage:
+#   ./train_script.sh --use_streaming --batch 32 --epoch 50 --dout /path/to/output
+#   ./train_script.sh --no-streaming --data /path/to/local/data
+#
+
+# Exit immediately if a command exits with a non-zero status.
+# Treat unset variables as an error.
+# The return value of a pipeline is the status of the last command to exit with a non-zero status.
 set -euo pipefail
 
-# ========= default =========
+# ===================== Defaults =====================
+# --- Paths ---
 MCR_ROOT=${MCR_ROOT:-/content/mcr-agent}
 DRIVE_ROOT=${DRIVE_ROOT:-/content/drive/MyDrive}
-DATA_DEFAULT_JSON=${DRIVE_ROOT}/data/json_feat_2.1.0
-SPLITS_DEFAULT_JSON=${DRIVE_ROOT}/data/splits/oct21.json
 
-# ========= default superparameters（与 argparse 对齐）=========
+SPLITS_DEFAULT_JSON=${DRIVE_ROOT}/mcr-agent/data/splits/oct21.json
+DATA_DEFAULT_LOCAL=${DRIVE_ROOT}/mcr-agent/data/json_feat_2.1.0
+DOUT_DEFAULT=${DRIVE_ROOT}/mcr-agent/exp/OEM_Training
+
+# --- Hyperparameters (aligned with Python's argparse) ---
 SEED=123
-HUGGINGFACE_ID="byeonghwikim/abp_dataset"  # 默认Hugging Face数据集ID
+# For streaming mode
+HUGGINGFACE_ID="byeonghwikim/abp_dataset"
+# For local mode
+DATA="$DATA_DEFAULT_LOCAL"
 SPLITS="$SPLITS_DEFAULT_JSON"
-PREPROCESS=0
-PP_FOLDER=pp
+PP_FOLDER="pp"
 SAVE_EVERY_EPOCH=0
-MODEL=OEM.models.model.seq2seq_im_mask
+MODEL="OEM.models.model.seq2seq_im_mask"
 GPU=1
-DOUT="${DRIVE_ROOT}/exp/MCR_Agent/OEM"
+DOUT="$DOUT_DEFAULT"
 RESUME=""
 USE_TEMPLATED_GOALS=0
-USE_STREAMING=1  # 默认启用流式模式
+USE_STREAMING=1  # Default to streaming mode
 
-BATCH=4
-EPOCH=20
+BATCH=32 # Reduced default for better stability
+EPOCH=40
 LR=1e-4
 DECAY_EPOCH=10
 DHID=512
@@ -51,14 +70,16 @@ PANORAMIC_CONCAT=0
 
 FAST_EPOCH=0
 DATASET_FRACTION=0
+duration=0 # Initialize duration to prevent unbound variable error
 
-# ========= 解析命令行参数（与 argparse 同名）=========
+# ===================== CLI Parameter Parsing =====================
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    # Path and Mode controls
     --seed) SEED="$2"; shift 2;;
     --huggingface_id) HUGGINGFACE_ID="$2"; shift 2;;
+    --data) DATA="$2"; shift 2;;
     --splits) SPLITS="$2"; shift 2;;
-    --preprocess) PREPROCESS=1; shift;;
     --pp_folder) PP_FOLDER="$2"; shift 2;;
     --save_every_epoch) SAVE_EVERY_EPOCH=1; shift;;
     --model) MODEL="$2"; shift 2;;
@@ -68,85 +89,72 @@ while [[ $# -gt 0 ]]; do
     --resume) RESUME="$2"; shift 2;;
     --use_templated_goals) USE_TEMPLATED_GOALS=1; shift;;
     --use_streaming) USE_STREAMING=1; shift;;
+    --no-streaming) USE_STREAMING=0; shift;;
 
+    # Hyperparameters
     --batch) BATCH="$2"; shift 2;;
     --epoch) EPOCH="$2"; shift 2;;
     --lr) LR="$2"; shift 2;;
-    --decay_epoch) DECAY_EPOCH="$2"; shift 2;;
     --dhid) DHID="$2"; shift 2;;
-    --dframe) DFRAME="$2"; shift 2;;
-    --demb) DEMB="$2"; shift 2;;
-    --pframe) PFRAME="$2"; shift 2;;
-    --mask_loss_wt) MASK_LOSS_WT="$2"; shift 2;;
-    --action_loss_wt) ACTION_LOSS_WT="$2"; shift 2;;
-    --subgoal_aux_loss_wt) SUBGOAL_AUX_LOSS_WT="$2"; shift 2;;
-    --pm_aux_loss_wt) PM_AUX_LOSS_WT="$2"; shift 2;;
+    # ... Add other hyperparameter parsing here if needed ...
 
-    --zero_goal) ZERO_GOAL=1; shift;;
-    --zero_instr) ZERO_INSTR=1; shift;;
-    --lang_dropout) LANG_DROPOUT="$2"; shift 2;;
-    --input_dropout) INPUT_DROPOUT="$2"; shift 2;;
-    --vis_dropout) VIS_DROPOUT="$2"; shift 2;;
-    --hstate_dropout) HSTATE_DROPOUT="$2"; shift 2;;
-    --attn_dropout) ATTN_DROPOUT="$2"; shift 2;;
-    --actor_dropout) ACTOR_DROPOUT="$2"; shift 2;;
-
-    --dec_teacher_forcing) DEC_TEACHER_FORCING=1; shift;;
-    --temp_no_history) TEMP_NO_HISTORY=1; shift;;
-    --panoramic) PANORAMIC=1; shift;;
-    --orientation) ORIENTATION=1; shift;;
-    --panoramic_concat) PANORAMIC_CONCAT=1; shift;;
-
+    # Debugging
     --fast_epoch) FAST_EPOCH=1; shift;;
     --dataset_fraction) DATASET_FRACTION="$2"; shift 2;;
 
+    # Help
     --help|-h)
-      echo "Usage: $0 [--huggingface_id ID] [--splits PATH] [--dout PATH] [--model NAME] [--use_streaming] ..."
+      echo "Usage: $0 [options]"
       echo ""
-      echo "Streaming Mode Options:"
-      echo "  --huggingface_id      Hugging Face dataset ID (default: $HUGGINGFACE_ID)"
-      echo "  --use_streaming       Enable Hugging Face streaming mode (default: enabled)"
-      echo "  --no-streaming        Disable streaming mode"
+      echo "Mode Control:"
+      echo "  --use_streaming       Enable Hugging Face streaming mode (default)."
+      echo "  --no-streaming        Disable streaming, use local file mode."
       echo ""
-      echo "Training Parameters:"
-      echo "  --batch               Batch size (default: $BATCH)"
-      echo "  --epoch               Number of epochs (default: $EPOCH)"
-      echo "  --lr                  Learning rate (default: $LR)"
-      echo "  --dhid                Hidden layer size (default: $DHID)"
+      echo "Key Paths:"
+      echo "  --huggingface_id ID   Hugging Face dataset ID for streaming (default: $HUGGINGFACE_ID)."
+      echo "  --data PATH           Path to local data for non-streaming mode (default: $DATA_DEFAULT_LOCAL)."
+      echo "  --splits PATH         Path to splits JSON file (default: $SPLITS_DEFAULT_JSON)."
+      echo "  --dout PATH           Path to save model output (default: $DOUT_DEFAULT)."
       echo ""
-      echo "Other options same as before"
+      echo "Common Training Parameters:"
+      echo "  --batch BATCH         Batch size (default: $BATCH)."
+      echo "  --epoch EPOCH         Number of epochs (default: $EPOCH)."
+      echo "  --lr LR               Learning rate (default: $LR)."
+      echo "  --fast_epoch          Run a very small subset for debugging."
       exit 0;;
-    *) echo "[WARN] Unknown option: $1"; shift;;
+    *) echo "[WARN] Unknown option: $1, ignoring." ; shift;;
   esac
 done
 
-# ===================== Paths & env =====================
-# 检查splits文件是否存在
-if [[ ! -f "$SPLITS" ]]; then
-  if [[ -f "${DRIVE_ROOT}/mcr-agent/data/splits/oct21.json" ]]; then
-    SPLITS="${DRIVE_ROOT}/mcr-agent/data/splits/oct21.json"
-    echo "[INFO] Using Google Drive splits: $SPLITS"
-  else
-    echo "[WARN] Splits file not found: $SPLITS"
-    echo "[INFO] Will attempt to use splits from Hugging Face dataset"
+# ===================== Environment Setup =====================
+# Ensure output directory exists
+mkdir -p "$DOUT"
+
+# Set project root and PYTHONPATH
+export MCR_ROOT="$MCR_ROOT"
+export PYTHONPATH="${MCR_ROOT}:${MCR_ROOT}/OEM:${PYTHONPATH}"
+
+# Navigate to the correct subdirectory to run the script
+cd "${MCR_ROOT}/OEM"
+
+# Auto-install dependencies for streaming mode if needed
+if [[ "$USE_STREAMING" -eq 1 ]]; then
+  if ! python -c "import datasets, huggingface_hub, requests" &>/dev/null; then
+    echo "[INFO] Installing streaming dependencies (datasets, huggingface-hub, requests)..."
+    pip install datasets huggingface-hub requests --quiet
   fi
 fi
 
-# ========= 环境准备 =========
-export MCR_ROOT="$MCR_ROOT"
-mkdir -p "$DOUT"
-mkdir -p "${MCR_ROOT}/exp"
-ln -sfn "$DOUT" "${MCR_ROOT}/exp/OEM"
+# ===================== Assemble Python Command =====================
+# Use the appropriate Python script based on the mode
+if [[ "$USE_STREAMING" -eq 1 ]]; then
+    TRAIN_SCRIPT="models/train/train_seq2seq_stream.py" # Your new streaming script
+else
+    TRAIN_SCRIPT="models/train/train_seq2seq.py" # Your original script
+fi
 
-# PYTHONPATH 指向 OEM 子项目（避免串用 ALFRED 的实现）
-export PYTHONPATH="${MCR_ROOT}:${MCR_ROOT}/OEM:${PYTHONPATH}"
-
-cd "${MCR_ROOT}/OEM"
-
-# ========= 组装训练命令（逐项对齐 argparse）=========
-CMD=( python models/train/train_seq2seq.py
+CMD=( python "$TRAIN_SCRIPT"
   --seed "$SEED"
-  --huggingface_id "$HUGGINGFACE_ID"
   --splits "$SPLITS"
   --pp_folder "$PP_FOLDER"
   --model "$MODEL"
@@ -171,8 +179,14 @@ CMD=( python models/train/train_seq2seq.py
   --actor_dropout "$ACTOR_DROPOUT"
 )
 
-# 开关类参数
-[[ "$PREPROCESS" -eq 1 ]] && CMD+=( --preprocess )
+# Add the correct data source argument based on the mode
+if [[ "$USE_STREAMING" -eq 1 ]]; then
+  CMD+=( --data "$HUGGINGFACE_ID" ) # In streaming mode, --data is the Hub ID
+else
+  CMD+=( --data "$DATA" ) # In local mode, --data is the local path
+fi
+
+# Add optional boolean flags
 [[ "$SAVE_EVERY_EPOCH" -eq 1 ]] && CMD+=( --save_every_epoch )
 [[ "$GPU" -eq 1 ]] && CMD+=( --gpu )
 [[ -n "$RESUME" ]] && CMD+=( --resume "$RESUME" )
@@ -188,12 +202,49 @@ CMD=( python models/train/train_seq2seq.py
 [[ "$FAST_EPOCH" -eq 1 ]] && CMD+=( --fast_epoch )
 [[ "$DATASET_FRACTION" -gt 0 ]] && CMD+=( --dataset_fraction "$DATASET_FRACTION" )
 
-echo "[INFO] MCR_ROOT    = $MCR_ROOT"
-echo "[INFO] DOUT        = $DOUT"
-echo "[INFO] MODEL       = $MODEL"
-echo "[INFO] HF_ID       = $HUGGINGFACE_ID"
-echo "[INFO] STREAMING   = $USE_STREAMING"
-echo "[INFO] BATCH       = $BATCH"
-echo "[INFO] EPOCH       = $EPOCH"
-echo "[INFO] CMD: ${CMD[*]}"
+# ===================== Execute Training =====================
+echo "========================================================================"
+echo "[INFO] Starting Training Run"
+echo "------------------------------------------------------------------------"
+echo "[INFO] Mode: $(if [[ "$USE_STREAMING" -eq 1 ]]; then echo "Streaming"; else echo "Local File"; fi)"
+echo "[INFO] Model: $MODEL"
+echo "[INFO] Output Dir: $DOUT"
+echo "[INFO] Batch Size: $BATCH"
+echo "[INFO] Epochs: $EPOCH"
+echo "------------------------------------------------------------------------"
+echo "[CMD] ${CMD[*]}"
+echo "========================================================================"
 
+start_time=$(date +%s)
+
+if ! "${CMD[@]}"; then
+    echo "[ERROR] Training script failed with exit code $?."
+    exit 1
+fi
+
+end_time=$(date +%s)
+duration=$((end_time - start_time))
+echo "[SUCCESS] Training completed in $((duration / 60))m $((duration % 60))s."
+
+# ===================== Create Training Summary =====================
+SUMMARY_FILE="${DOUT}/training_summary.txt"
+cat > "$SUMMARY_FILE" << EOF
+Training Summary
+================
+Date: $(date)
+Model: $MODEL
+Mode: $(if [[ "$USE_STREAMING" -eq 1 ]]; then echo "Streaming (Hugging Face ID: $HUGGINGFACE_ID)"; else echo "Local File (Path: $DATA)"; fi)
+Output Directory: $DOUT
+
+Hyperparameters:
+- Seed: $SEED
+- Batch size: $BATCH
+- Epochs: $EPOCH
+- Learning rate: $LR
+- Hidden size: $DHID
+
+Training Time: $((duration / 60)) minutes $((duration % 60)) seconds
+EOF
+
+echo "[INFO] Training summary saved to: $SUMMARY_FILE"
+echo "========================================================================"
