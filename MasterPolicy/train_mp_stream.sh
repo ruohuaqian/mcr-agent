@@ -182,7 +182,7 @@ CMD=( python "$TRAIN_SCRIPT"
 [[ "$SAVE_EVERY_EPOCH" -eq 1 ]] && CMD+=( --save_every_epoch )
 [[ "$GPU" -eq 1 ]] && CMD+=( --gpu )
 [[ -n "$RESUME" ]] && CMD+=( --resume "$RESUME" )
-[[ "$USE_TEMPLATED_GOals" -eq 1 ]] && CMD+=( --use_templated_goals )
+[[ "$USE_TEMPLATED_GOALS" -eq 1 ]] && CMD+=( --use_templated_goals )
 [[ "$USE_STREAMING" -eq 1 ]] && CMD+=( --use_streaming )
 
 [[ "$ZERO_GOAL" -eq 1 ]] && CMD+=( --zero_goal )
