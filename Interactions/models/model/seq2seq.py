@@ -115,7 +115,7 @@ class Module(nn.Module):
                     continue
 
                 out = self.forward(feat)
-                preds = self.extract_preds(out, batch, feat)
+                # preds = self.extract_preds(out, batch, feat)
                 # p_train.update(preds)
                 loss = self.compute_loss(out, batch, feat)
                 # print(loss.keys())
@@ -224,7 +224,7 @@ class Module(nn.Module):
                     continue
 
                 out = self.forward(feat)
-                preds = self.extract_preds(out, batch, feat)
+                # preds = self.extract_preds(out, batch, feat)
                 loss = self.compute_loss(out, batch, feat)
 
                 # 记录损失

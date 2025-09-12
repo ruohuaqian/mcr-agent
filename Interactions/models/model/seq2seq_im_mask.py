@@ -832,33 +832,42 @@ class Module(Base):
         '''
         Output processing
         '''
-        pred = {}
-        for data_item, alow, alow_mask in zip(batch, feat['out_action_low'].max(2)[1].tolist(),
-                                              feat['out_action_low_mask']):
-            ex = data_item['ex']  # Extract the 'ex' field from the dictionary
-            # Remove padding tokens
-            if self.pad in alow:
-                pad_start_idx = alow.index(self.pad)
-                alow = alow[:pad_start_idx]
-                alow_mask = alow_mask[:pad_start_idx]
 
-            if clean_special_tokens:
-                if self.stop_token in alow:
-                    stop_start_idx = alow.index(self.stop_token)
-                    alow = alow[:stop_start_idx]
-                    alow_mask = alow_mask[:stop_start_idx]
+        def extract_preds(self, out, batch, feat, clean_special_tokens=True):
+            '''
+            Output processing
+            '''
+            pred = {}
+            for data_item, alow, alow_mask in zip(batch, feat['out_action_low'].max(2)[1].tolist(),
+                                                  feat['out_action_low_mask']):
+                if isinstance(data_item, dict):
+                    ex = data_item['ex']  # Extract 'ex' from dictionary
+                else:
+                    ex, _ = data_item  # Fallback for tuple-based batch
+                # Remove padding tokens
+                if self.pad in alow:
+                    pad_start_idx = alow.index(self.pad)
+                    alow = alow[:pad_start_idx]
+                    alow_mask = alow_mask[:pad_start_idx]
 
-            # Index to API actions
-            words = self.vocab['action_low'].index2word(alow)
+                if clean_special_tokens:
+                    if self.stop_token in alow:
+                        stop_start_idx = alow.index(self.stop_token)
+                        alow = alow[:stop_start_idx]
+                        alow_mask = alow_mask[:stop_start_idx]
 
-            p_mask = [alow_mask[t].detach().cpu().numpy() for t in range(alow_mask.shape[0])]
+                # Index to API actions
+                words = self.vocab['action_low'].index2word(alow)
 
-            pred[self.get_task_and_ann_id(ex)] = {
-                'action_low': ' '.join(words),
-                'action_low_mask': p_mask,
-            }
+                p_mask = [alow_mask[t].detach().cpu().numpy() for t in range(alow_mask.shape[0])]
 
-        return pred
+                pred[self.get_task_and_ann_id(ex)] = {
+                    'action_low': ' '.join(words),
+                    'action_low_mask': p_mask,
+                }
+
+            return pred
+
     def embed_action(self, action):
         '''
         embed low-level action
