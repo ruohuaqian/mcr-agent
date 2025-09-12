@@ -186,7 +186,7 @@ class Module(nn.Module):
             train_stream = fraction_stream(train_stream, self.args.dataset_fraction)
 
         # 初始化优化器
-        optimizer = optimizer or torch.optim.Adam(self.model.parameters(), lr=args.lr)
+        optimizer = optimizer or torch.optim.Adam(self.parameters(), lr=args.lr)
 
         # 初始化SummaryWriter
         try:
@@ -205,8 +205,8 @@ class Module(nn.Module):
 
         for epoch in trange(0, args.epoch, desc='epoch'):
             m_train = collections.defaultdict(list)
-            self.model.train()
-            self.model.adjust_lr(optimizer, args.lr, epoch, args.decay_epoch)
+            self.train()
+            self.adjust_lr(optimizer, args.lr, epoch, args.decay_epoch)
             total_train_loss = []
 
             # 随机打乱流式数据
@@ -220,8 +220,8 @@ class Module(nn.Module):
                 try:
                     feat = self.streaming_featurize(batch)
 
-                    out = self.model.forward(feat)
-                    loss = self.model.compute_loss(out, batch, feat)
+                    out = self.forward(feat)
+                    loss = self.compute_loss(out, batch, feat)
 
                     # 记录损失
                     for k, v in loss.items():
@@ -385,12 +385,12 @@ class Module(nn.Module):
                 val_action_high[-1] = 1
 
                 # 序列化语言动作
-                self.model.serialize_lang_action(ex, action_high_order)
+                self.serialize_lang_action(ex, action_high_order)
 
                 # 语言处理
                 lang_goal, lang_instr = ex['num']['lang_goal'], ex['num']['lang_instr']
-                lang_goal = self.model.zero_input(lang_goal) if self.args.zero_goal else lang_goal
-                lang_instr = self.model.zero_input(lang_instr) if self.args.zero_instr else lang_instr
+                lang_goal = self.zero_input(lang_goal) if self.args.zero_goal else lang_goal
+                lang_instr = self.zero_input(lang_instr) if self.args.zero_instr else lang_instr
 
                 feat['lang_goal'].append(lang_goal)
                 feat['lang_instr'].append(lang_instr)
@@ -484,7 +484,7 @@ class Module(nn.Module):
                     if seqs:
                         pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
                         seq_lengths = np.array([len(vv) for vv in v if len(vv) > 0])
-                        embed_seq = self.model.emb_word(pad_seq)
+                        embed_seq = self.emb_word(pad_seq)
                         packed_input = pack_padded_sequence(embed_seq, seq_lengths, batch_first=True,
                                                             enforce_sorted=False)
                         feat[k] = packed_input
@@ -498,7 +498,7 @@ class Module(nn.Module):
 
                     if seqs:
                         pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
-                        embed_seq = self.model.emb_word(pad_seq)
+                        embed_seq = self.emb_word(pad_seq)
                         feat[k] = {'seq': embed_seq, 'len': num_instr}
                     else:
                         feat[k] = {'seq': torch.tensor([], device=device), 'len': num_instr}
