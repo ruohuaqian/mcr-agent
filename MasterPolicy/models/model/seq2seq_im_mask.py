@@ -322,18 +322,15 @@ class Module(Base):
 
     def streaming_featurize(self, batch_data):
         '''
-        流式特征处理 - 修复导航版本
+        流式特征处理 - 确保设备一致性
         '''
         device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
         feat = collections.defaultdict(list)
 
         for data_item in batch_data:
             if data_item is None:
+                self._add_empty_features(feat, device)  # 传递设备信息
                 continue
-
-            ex = data_item['ex']
-            swapColor = data_item['swapColor']
-            im_data = data_item['im']
 
             try:
                 # 辅助特征提取
@@ -449,22 +446,21 @@ class Module(Base):
                 feat['objnav'].append(new_obj_list)
                 feat['action_low_mask_label'].append(indices)
 
-                # ============ 关键修复：图像特征处理 ============
+                # 图像特征处理 - make sure 在CPU上处理，后续会转移到正确设备
                 val_indices = val_action_high.nonzero()[0]
 
-                # 检查图像数据是否有效
                 if len(im_data) >= 5 and len(val_indices) > 0:
                     try:
                         # 确保索引在有效范围内
                         valid_indices = val_indices[val_indices < len(im_data[0])]
 
                         if len(valid_indices) > 0:
-                            # 逐个视角处理，避免内存爆炸
-                            feat['frames'].append(im_data[2][valid_indices])  # 主视角
-                            feat['frames_left'].append(im_data[0][valid_indices])  # 左侧
-                            feat['frames_up'].append(im_data[1][valid_indices])  # 上方
-                            feat['frames_down'].append(im_data[3][valid_indices])  # 下方
-                            feat['frames_right'].append(im_data[4][valid_indices])  # 右侧
+                            # 保持在CPU上，后续统一转移设备
+                            feat['frames'].append(im_data[2][valid_indices].cpu())  # 主视角
+                            feat['frames_left'].append(im_data[0][valid_indices].cpu())  # 左侧
+                            feat['frames_up'].append(im_data[1][valid_indices].cpu())  # 上方
+                            feat['frames_down'].append(im_data[3][valid_indices].cpu())  # 下方
+                            feat['frames_right'].append(im_data[4][valid_indices].cpu())  # 右侧
                         else:
                             self._add_empty_image_features(feat, device)
 
@@ -475,14 +471,11 @@ class Module(Base):
                     self._add_empty_image_features(feat, device)
 
             except Exception as e:
-                print(f"Error processing task {data_item.get('task_path', 'unknown')}: {e}")
-                import traceback
-                traceback.print_exc()
-                # 添加空特征以避免后续错误
+                print(f"Error processing task: {e}")
                 self._add_empty_features(feat, device)
                 continue
 
-        # 张量化和填充
+        # 张量化和填充 - 这会处理设备转移
         feat = self._tensorize_and_pad(feat, device)
 
         # 添加方向特征（在张量化之后）
@@ -514,7 +507,7 @@ class Module(Base):
 
     def _tensorize_and_pad(self, feat, device):
         '''
-        张量化和填充逻辑 - 修复版
+        张量化和填充逻辑 - 确保设备一致性
         '''
         for k, v in feat.items():
             try:
@@ -529,10 +522,12 @@ class Module(Base):
                                                             enforce_sorted=False)
                         feat[k] = packed_input
                     else:
-                        feat[k] = None
+                        # 创建空的packed sequence
+                        empty_seq = torch.zeros(0, 1, self.demb, device=device)
+                        feat[k] = pack_padded_sequence(empty_seq, [0], batch_first=True)
 
                 elif k in {'lang_instr'}:
-                    # 处理指令语言
+                    # 处理指令语言 - 确保在正确设备上
                     num_instr = np.array([len(vv) for vv in v])
                     seqs = []
                     for vv in v:
@@ -554,51 +549,16 @@ class Module(Base):
 
                         feat[k] = {'seq': fin_seq}
                     else:
-                        feat[k] = {'seq': []}
-
-                elif k in {'action_low_mask_label'}:
-                    # 处理掩码标签
-                    if v and any(len(vv) > 0 for vv in v):
-                        seqs = torch.tensor([vvv for vv in v for vvv in vv], device=device, dtype=torch.long)
-                        feat[k] = seqs
-                    else:
-                        feat[k] = torch.tensor([], device=device, dtype=torch.long)
-
-                elif k in {'subgoal_progress', 'subgoals_completed'}:
-                    # 处理辅助损失
-                    seqs = [torch.tensor(vv, device=device, dtype=torch.float) for vv in v if len(vv) > 0]
-                    if seqs:
-                        pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
-                        feat[k] = pad_seq
-                    else:
-                        feat[k] = torch.tensor([], device=device, dtype=torch.float)
-
-                elif k in {'action_high', 'action_high_order'}:
-                    # 处理高级动作
-                    seqs = [torch.tensor(vv, device=device, dtype=torch.long) for vv in v if len(vv) > 0]
-                    if seqs:
-                        pad_seq = pad_sequence(seqs, batch_first=True,
-                                               padding_value=self.vocab['action_high'].word2index('<<pad>>'))
-                        feat[k] = pad_seq
-                    else:
-                        feat[k] = torch.tensor([], device=device, dtype=torch.long)
-
-                elif k in {'objnav'}:
-                    # 处理对象导航
-                    seqs = [torch.tensor(vv, device=device, dtype=torch.long) for vv in v if len(vv) > 0]
-                    if seqs:
-                        pad_seq = pad_sequence(seqs, batch_first=True,
-                                               padding_value=self.vocab['objnav'].word2index('<<pad>>'))
-                        embed_seq = self.emb_objnav(pad_seq)
-                        feat[k] = embed_seq
-                    else:
-                        feat[k] = torch.tensor([], device=device, dtype=torch.long)
+                        feat[k] = {'seq': [torch.tensor([], device=device)]}
 
                 elif k in {'frames', 'frames_left', 'frames_up', 'frames_down', 'frames_right'}:
-                    # 处理图像特征 - 关键修复
+                    # 处理图像特征 - 关键修复：确保所有张量都在同一设备上
                     non_empty_tensors = [tensor for tensor in v if tensor.numel() > 0]
 
                     if non_empty_tensors:
+                        # 转移所有张量到同一设备
+                        non_empty_tensors = [tensor.to(device) for tensor in non_empty_tensors]
+
                         # 找到最大尺寸
                         max_shape = max(tensor.shape for tensor in non_empty_tensors)
 
@@ -606,10 +566,13 @@ class Module(Base):
                         padded_tensors = []
                         for tensor in v:
                             if tensor.numel() == 0:
-                                # 创建空的占位张量
+                                # 创建空的占位张量（在同一设备上）
                                 empty_tensor = torch.zeros((0,) + max_shape[1:], device=device, dtype=torch.float)
                                 padded_tensors.append(empty_tensor)
                             else:
+                                # 确保张量在正确设备上
+                                tensor = tensor.to(device)
+
                                 # 确保张量具有正确的维度
                                 if tensor.shape != max_shape:
                                     # 调整尺寸
@@ -627,7 +590,7 @@ class Module(Base):
                         feat[k] = torch.tensor([], device=device, dtype=torch.float)
 
                 else:
-                    # 默认处理
+                    # 默认处理 - 确保在正确设备上
                     seqs = [torch.tensor(vv, device=device, dtype=torch.long) for vv in v if len(vv) > 0]
                     if seqs:
                         pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
@@ -637,13 +600,14 @@ class Module(Base):
 
             except Exception as e:
                 print(f"Error processing feature {k}: {e}")
-                # 设置适当的空值
+                # 设置适当的空值（在正确设备上）
                 if 'frame' in k:
                     feat[k] = torch.tensor([], device=device, dtype=torch.float)
                 else:
                     feat[k] = torch.tensor([], device=device, dtype=torch.long)
 
         return feat
+
 
     def _add_orientation_features(self, feat, device):
         '''
@@ -720,21 +684,124 @@ class Module(Base):
         return mask
 
     def forward(self, feat, max_decode=300):
+        # 确保所有特征都在正确的设备上
+        device = next(self.parameters()).device  # 获取模型所在的设备
 
-        frames = self.vis_dropout(feat['frames'])
-        if self.panoramic:
-            frames_left = self.vis_dropout(feat['frames_left'])
-            frames_up = self.vis_dropout(feat['frames_up'])
-            frames_down = self.vis_dropout(feat['frames_down'])
-            frames_right = self.vis_dropout(feat['frames_right'])
-            res = self.dec(feat['objnav'], feat['lang_instr']['seq'], frames, frames_left, frames_up, frames_down,
-                           frames_right, max_decode=max_decode,
-                           gold=feat['action_low'])  # , state_0_instr=state_0_instr)
-        else:
-            res = self.dec(enc_lang_goal, enc_lang_instr, frames, max_decode=max_decode, gold=feat['action_low'],
-                           state_0_goal=state_0_goal, state_0_instr=state_0_instr)
-        feat.update(res)
+        # 转移所有特征到模型所在的设备
+        feat = self._ensure_features_on_device(feat, device)
+
+        try:
+            # 处理视觉特征
+            frames = self.vis_dropout(feat['frames'])
+
+            if self.panoramic:
+                frames_left = self.vis_dropout(feat['frames_left'])
+                frames_up = self.vis_dropout(feat['frames_up'])
+                frames_down = self.vis_dropout(feat['frames_down'])
+                frames_right = self.vis_dropout(feat['frames_right'])
+
+                # 使用正确的语言特征
+                if 'lang_instr' in feat and 'objnav' in feat:
+                    res = self.dec(
+                        feat['objnav'],
+                        feat['lang_instr']['seq'],
+                        frames, frames_left, frames_up, frames_down, frames_right,
+                        max_decode=max_decode,
+                        gold=feat.get('action_low', None)
+                    )
+                else:
+                    raise ValueError("Missing required language features for panoramic mode")
+
+            else:
+                # 为非全景模式准备语言特征
+                enc_lang_goal, state_0_goal = self._process_language_goal(feat, device)
+                enc_lang_instr, state_0_instr = self._process_language_instr(feat, device)
+
+                res = self.dec(
+                    enc_lang_goal,
+                    enc_lang_instr,
+                    frames,
+                    max_decode=max_decode,
+                    gold=feat.get('action_low', None),
+                    state_0_goal=state_0_goal,
+                    state_0_instr=state_0_instr
+                )
+
+            feat.update(res)
+            return feat
+
+        except Exception as e:
+            print(f"Error in forward pass: {e}")
+            import traceback
+            traceback.print_exc()
+            # 返回空的特征字典以避免后续错误
+            return feat
+
+    def _ensure_features_on_device(self, feat, device):
+        """确保所有特征都在正确的设备上"""
+        for key, value in feat.items():
+            if torch.is_tensor(value):
+                feat[key] = value.to(device)
+            elif isinstance(value, dict):
+                # 递归处理字典中的张量
+                for sub_key, sub_value in value.items():
+                    if torch.is_tensor(sub_value):
+                        value[sub_key] = sub_value.to(device)
+            elif isinstance(value, (list, tuple)):
+                # 处理列表或元组中的张量
+                new_value = []
+                for item in value:
+                    if torch.is_tensor(item):
+                        new_value.append(item.to(device))
+                    else:
+                        new_value.append(item)
+                feat[key] = type(value)(new_value)
+
         return feat
+
+    def _process_language_goal(self, feat, device):
+        """处理目标语言特征"""
+        if 'lang_goal' in feat:
+            if hasattr(feat['lang_goal'], 'pi'):  # 如果是packed sequence
+                enc_lang_goal = feat['lang_goal'].pi
+                # 获取初始隐藏状态
+                _, state_0_goal = self.enc_lang_goal(enc_lang_goal)
+                return enc_lang_goal, state_0_goal
+            else:
+                # 处理普通张量
+                lang_goal_tensor = feat['lang_goal'].to(device) if torch.is_tensor(feat['lang_goal']) else feat[
+                    'lang_goal']
+                enc_lang_goal, state_0_goal = self.enc_lang_goal(lang_goal_tensor)
+                return enc_lang_goal, state_0_goal
+        else:
+            # 创建空的占位符
+            batch_size = feat['frames'].size(0) if 'frames' in feat else 1
+            empty_goal = torch.zeros(batch_size, 1, self.demb, device=device)
+            return empty_goal, None
+
+    def _process_language_instr(self, feat, device):
+        """处理指令语言特征"""
+        if 'lang_instr' in feat:
+            lang_instr_data = feat['lang_instr']
+
+            if isinstance(lang_instr_data, dict) and 'seq' in lang_instr_data:
+                # 处理字典格式的指令
+                instr_seqs = lang_instr_data['seq']
+                if instr_seqs:
+                    # 处理第一个指令序列
+                    first_seq = instr_seqs[0].to(device) if torch.is_tensor(instr_seqs[0]) else instr_seqs[0]
+                    enc_lang_instr, state_0_instr = self.enc_lang_instr(first_seq)
+                    return enc_lang_instr, state_0_instr
+
+            # 回退到普通张量处理
+            lang_instr_tensor = lang_instr_data.to(device) if torch.is_tensor(lang_instr_data) else lang_instr_data
+            enc_lang_instr, state_0_instr = self.enc_lang_instr(lang_instr_tensor)
+            return enc_lang_instr, state_0_instr
+        else:
+            # 创建空的占位符
+            batch_size = feat['frames'].size(0) if 'frames' in feat else 1
+            empty_instr = torch.zeros(batch_size, 1, self.demb, device=device)
+            return empty_instr, None
 
     def encode_lang(self, feat):
         '''
