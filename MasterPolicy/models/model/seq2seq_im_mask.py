@@ -319,6 +319,242 @@ class Module(Base):
                 feat[k] = pad_seq
 
         return feat
+    def streaming_featurize(self, batch_data):
+        '''
+        流式特征处理 - 导航版本
+        '''
+        device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
+        feat = collections.defaultdict(list)
+
+        for data_item in batch_data:
+            if data_item is None:
+                continue
+
+            ex = data_item['ex']
+            swapColor = data_item['swapColor']
+            im_data = data_item['im']
+
+            try:
+                # 辅助特征提取
+                action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
+                low_to_high_idx = ex['num']['low_to_high_idx']
+                action_high = action_high_order[low_to_high_idx]
+
+                feat['action_high'].append(action_high)
+                feat['action_high_order'].append(action_high_order)
+
+                # GotoLocation 验证
+                val_action_high = (
+                            action_high == self.vocab['action_high'].word2index('GotoLocation', train=False)).astype(
+                    np.int64)
+
+                v = 0
+                while v < (len(val_action_high) - 1):
+                    if (val_action_high[v] - val_action_high[v + 1]) == 1:
+                        val_action_high[v + 1] = 1
+                        v += 1
+                    v += 1
+                val_action_high[-1] = 1
+
+                # 序列化语言动作
+                self.serialize_lang_action(ex, action_high_order)
+
+                # 语言处理
+                lang_goal, lang_instr = ex['num']['lang_goal'], ex['num']['lang_instr']
+                lang_goal = self.zero_input(lang_goal) if self.args.zero_goal else lang_goal
+                lang_instr = self.zero_input(lang_instr) if self.args.zero_instr else lang_instr
+
+                feat['lang_goal'].append(lang_goal)
+                feat['lang_instr'].append(lang_instr)
+
+                # 动作处理
+                alow = []
+                alow_manip = []
+                obj_high_indices = []
+
+                for ia, a in enumerate(ex['num']['action_low']):
+                    if val_action_high[ia] == 1 and a['action'] in self.vocab['action_low'].word2index(
+                            ['<<pad>>', '<<seg>>', '<<stop>>', 'LookDown_15', 'LookUp_15', 'RotateLeft_90',
+                             'RotateRight_90', 'MoveAhead_25'], train=False):
+                        alow.append(a['action'])
+                    elif val_action_high[ia] == 1:
+                        alow.append(self.vocab['action_low'].word2index('Manipulate', train=False))
+
+                    if not (a['action'] in self.vocab['action_low'].word2index(
+                            ['<<pad>>', '<<seg>>', '<<stop>>', 'LookDown_15', 'LookUp_15', 'RotateLeft_90',
+                             'RotateRight_90', 'MoveAhead_25'], train=False)):
+                        alow_manip.append(a['action'])
+                        obj_high_indices.append(low_to_high_idx[ia])
+
+                feat['action_low'].append(alow)
+                feat['action_low_manip'].append(alow_manip)
+                feat['obj_high_indices'].append(obj_high_indices)
+
+                # 辅助损失
+                if self.args.subgoal_aux_loss_wt > 0:
+                    feat['subgoals_completed'].append(
+                        np.array(ex['num']['low_to_high_idx'])[
+                            val_action_high.nonzero()[0].astype(int)] / self.max_subgoals
+                    )
+
+                if self.args.pm_aux_loss_wt > 0:
+                    num_actions = len(alow)
+                    subgoal_progress = [(i + 1) / float(num_actions) for i in range(num_actions)]
+                    feat['subgoal_progress'].append(subgoal_progress)
+
+                # 对象导航和掩码
+                obj_list = [self.vocab['objnav'].word2index('<<nav>>')]
+                high_idx = 0
+                indices = []
+
+                for a in ex['plan']['low_actions']:
+                    if a['api_action']['action'] in ['MoveAhead', 'LookUp', 'LookDown', 'RotateRight', 'RotateLeft']:
+                        if a['high_idx'] == (high_idx + 1):
+                            obj_list.append(self.vocab['objnav'].word2index('<<nav>>', train=False))
+                            high_idx += 1
+                        continue
+
+                    if a['api_action']['action'] == 'PutObject':
+                        label = a['api_action']['receptacleObjectId'].split('|')
+                    else:
+                        label = a['api_action']['objectId'].split('|')
+
+                    try:
+                        class_name = label[4].split('_')[0] if len(label) >= 5 else label[0]
+                        indices.append(classes.index(class_name))
+                    except (IndexError, ValueError):
+                        indices.append(0)
+
+                    if a['high_idx'] == (high_idx + 1):
+                        try:
+                            class_name = (label[4].split('_')[0] if len(label) >= 5 else label[0]).lower()
+                            obj_list.append(self.vocab['objnav'].word2index(class_name, train=False))
+                        except:
+                            obj_list.append(self.vocab['objnav'].word2index('<<nav>>', train=False))
+                        high_idx += 1
+
+                new_obj_list = [obj_list[o + 1] for o, obj in enumerate(obj_list) if
+                                (obj == self.vocab['objnav'].word2index('<<nav>>'))]
+                feat['objnav'].append(new_obj_list)
+                feat['action_low_mask_label'].append(indices)
+
+                # 图像特征处理
+                if len(im_data) >= 5:
+                    # 使用 val_action_high 作为掩码
+                    val_indices = val_action_high.nonzero()[0]
+                    feat['frames'].append(im_data[2][val_indices])
+                    feat['frames_left'].append(im_data[0][val_indices])
+                    feat['frames_up'].append(im_data[1][val_indices])
+                    feat['frames_down'].append(im_data[3][val_indices])
+                    feat['frames_right'].append(im_data[4][val_indices])
+                else:
+                    # 添加空张量
+                    empty_tensor = torch.tensor([], device=device, dtype=torch.float)
+                    for view in ['frames', 'frames_left', 'frames_up', 'frames_down', 'frames_right']:
+                        feat[view].append(empty_tensor)
+
+            except Exception as e:
+                print(f"Error processing task {data_item.get('task_path', 'unknown')}: {e}")
+                continue
+                # 添加方向特征
+        if self.orientation:
+            feat = self._add_orientation_features(feat, device)
+        # 张量化和填充
+        feat = self._tensorize_and_pad(feat, device)
+        return feat
+
+    def _tensorize_and_pad(self, feat, device):
+        '''
+        张量化和填充逻辑
+        '''
+        # 实现与之前类似的张量化逻辑
+        for k, v in feat.items():
+            try:
+                if k in {'lang_goal'}:
+                    # 语言特征处理
+                    seqs = [torch.tensor(vv, device=device) for vv in v if len(vv) > 0]
+                    if seqs:
+                        pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+                        seq_lengths = np.array([len(vv) for vv in v if len(vv) > 0])
+                        embed_seq = self.emb_word(pad_seq)
+                        packed_input = pack_padded_sequence(embed_seq, seq_lengths, batch_first=True,
+                                                            enforce_sorted=False)
+                        feat[k] = packed_input
+                    else:
+                        feat[k] = None
+
+                elif k in {'lang_instr'}:
+                    # 指令处理
+                    num_instr = np.array([len(vv) for vv in v])
+                    seqs = [torch.tensor(vvv, device=device) for vv in v for vvv in vv if len(vv) > 0]
+                    if seqs:
+                        pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+                        embed_seq = self.emb_word(pad_seq)
+                        fin_seq = []
+                        in_idx = 0
+                        for l in num_instr:
+                            if l > 0:
+                                fin_seq.append(embed_seq[in_idx:in_idx + l])
+                                in_idx += l
+                            else:
+                                fin_seq.append(torch.tensor([], device=device))
+                        feat[k] = {'seq': fin_seq}
+                    else:
+                        feat[k] = {'seq': []}
+
+                # 其他特征类型的处理...
+
+            except Exception as e:
+                print(f"Error processing feature {k}: {e}")
+                feat[k] = torch.tensor([], device=device)
+
+        return feat
+
+    def _add_orientation_features(self, feat, device):
+        '''
+        添加方向特征
+        '''
+        import math
+
+        def get_orientation(d, device):
+            if d == 'left':
+                h, v = -math.pi / 2, 0.0
+            elif d == 'up':
+                h, v = 0.0, -math.pi / 12
+            elif d == 'down':
+                h, v = 0.0, math.pi / 12
+            elif d == 'right':
+                h, v = math.pi / 2, 0.0
+            else:  # 'front'
+                h, v = 0.0, 0.0
+
+            orientation = torch.cat([
+                torch.cos(torch.ones(1, device=device) * h),
+                torch.sin(torch.ones(1, device=device) * h),
+                torch.cos(torch.ones(1, device=device) * v),
+                torch.sin(torch.ones(1, device=device) * v),
+            ]).unsqueeze(-1).unsqueeze(-1).repeat(1, 7, 7)
+
+            return orientation
+
+        # 为每个视角添加方向信息
+        orientation_mapping = {
+            'frames': 'front',
+            'frames_left': 'left',
+            'frames_up': 'up',
+            'frames_down': 'down',
+            'frames_right': 'right'
+        }
+
+        for view_key, direction in orientation_mapping.items():
+            if view_key in feat and feat[view_key].numel() > 0:
+                view_tensor = feat[view_key]
+                orientation_tensor = get_orientation(direction, device)
+                batch_size, channels, height, width = view_tensor.shape
+                orientation_expanded = orientation_tensor.unsqueeze(0).repeat(batch_size, 1, 1, 1)
+                feat[view_key] = torch.cat([view_tensor, orientation_expanded], dim=1)
+
+        return feat
 
 
     def serialize_lang_action(self, feat, action_high_order):
