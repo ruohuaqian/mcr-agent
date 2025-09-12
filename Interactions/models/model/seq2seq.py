@@ -317,7 +317,7 @@ class Module(nn.Module):
         '''
         保存检查点
         '''
-        if self.args.save_each_epoch:
+        if self.args.save_every_epoch:
             filename = f'net_epoch_{epoch}.pth'
         else:
             filename = f'latest.pth'
