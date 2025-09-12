@@ -265,9 +265,10 @@ class Module(nn.Module):
         '''
         流式加载单个任务数据
         '''
+        task_path = task['task']
         try:
             # 加载JSON数据
-            json_filename = f"{task['task']}/pp/ann_{task['repeat_idx']}.json"  # 假设repeat_idx=0
+            json_filename = f"{task_path}/pp/ann_{task['repeat_idx']}.json"  # 假设repeat_idx=0
             json_url = hf_hub_url(
                 repo_id=self.args.huggingface_id,
                 filename=json_filename,
@@ -298,13 +299,13 @@ class Module(nn.Module):
             return {
                 'ex': ex,
                 'im': im,
-                'task_path': task['task'],
+                'task_path': task_path,
                 'repeat_idx': task['repeat_idx'],
                 'swapColor': swapColor
             }
 
         except Exception as e:
-            print(f"Error loading task {task['task']}: {e}")
+            print(f"Error loading task {task_path}: {e}")
             return None
 
     def save_checkpoint(self, epoch, batch_count, optimizer, dout_path, is_epoch_end=False):
