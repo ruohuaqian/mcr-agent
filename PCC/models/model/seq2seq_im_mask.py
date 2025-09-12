@@ -216,7 +216,34 @@ class Module(Base):
                 pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
                 embed_seq = self.emb_word(pad_seq)
                 feat[k] = {'seq': embed_seq, 'len': num_instr}
-            # ... 其他处理逻辑保持不变
+            elif k in {'action_low_mask'}:
+                # mask padding
+                seqs = [torch.tensor(vv, device=device, dtype=torch.float) for vv in v]
+                feat[k] = seqs
+            elif k in {'action_low_mask_label'}:
+                # label
+                seqs = torch.tensor([vvv for vv in v for vvv in vv], device=device, dtype=torch.long)
+                feat[k] = seqs
+            elif k in {'subgoal_progress', 'subgoals_completed'}:
+                # auxillary padding
+                seqs = [torch.tensor(vv, device=device, dtype=torch.float) for vv in v]
+                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+                feat[k] = pad_seq
+            elif k in {'action_high'}:
+                seqs = [torch.tensor(vv, device=device, dtype=torch.long) for vv in v]
+                pad_seq = pad_sequence(seqs, batch_first=True,
+                                       padding_value=self.vocab['action_high'].word2index('<<pad>>'))
+                feat[k] = pad_seq
+            elif k in {'action_high_order'}:
+                seqs = [torch.tensor(vvv, device=device, dtype=torch.long) for vv in v for vvv in vv]
+                feat[k] = torch.tensor(seqs)
+            else:
+                # default: tensorize and pad sequence
+                seqs = [torch.tensor(vv, device=device,
+                                     dtype=torch.float if ('frames' in k or 'orientation' in k) else torch.long) for vv
+                        in v]
+                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+                feat[k] = pad_seq
 
         return feat
 

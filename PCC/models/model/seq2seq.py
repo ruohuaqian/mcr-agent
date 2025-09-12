@@ -153,43 +153,45 @@ class Module(nn.Module):
         # 创建流式数据集
         train_stream = ALFREDStreamingDataset(
             repo_id=self.args.huggingface_id,
-            task_list=[{'task': s, 'repeat_idx': 0} for s in train_list],
+            task_list=train_list,
             feat_pt=self.feat_pt,
             args=self.args
         )
 
         valid_seen_stream = ALFREDStreamingDataset(
             repo_id=self.args.huggingface_id,
-            task_list=[{'task': s, 'repeat_idx': 0} for s in valid_seen],
+            task_list=valid_seen,
             feat_pt=self.feat_pt,
             args=self.args
         )
 
         valid_unseen_stream = ALFREDStreamingDataset(
             repo_id=self.args.huggingface_id,
-            task_list=[{'task': s, 'repeat_idx': 0} for s in valid_unseen],
+            task_list=valid_unseen,
             feat_pt=self.feat_pt,
             args=self.args
         )
 
         # 调试模式：使用小数据集
+        def limited_stream(stream, limit):
+            count = 0
+            for item in stream:
+                if count >= limit:
+                    break
+                yield item
+                count += 1
         if self.args.dataset_fraction > 0:
             # 对于流式数据，我们需要在迭代时进行限制
             train_size = int(len(train_list) * self.args.dataset_fraction * 0.7)
             valid_size = int(len(valid_seen) * (self.args.dataset_fraction * 0.3) / 2)
 
-            def limited_stream(stream, limit):
-                count = 0
-                for item in stream:
-                    if count >= limit:
-                        break
-                    yield item
-                    count += 1
-
             train_stream = limited_stream(train_stream, train_size)
             valid_seen_stream = limited_stream(valid_seen_stream, valid_size)
             valid_unseen_stream = limited_stream(valid_unseen_stream, valid_size)
-
+        if self.args.fast_epoch:
+            train_stream = limited_stream(train_stream, 16)
+            valid_seen_stream = limited_stream(valid_seen_stream, 1)
+            valid_unseen_stream = limited_stream(valid_unseen_stream, 1)
         # 初始化 tensorboard
         self.summary_writer = SummaryWriter(log_dir=args.dout)
 
