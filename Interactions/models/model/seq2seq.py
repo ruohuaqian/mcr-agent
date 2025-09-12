@@ -304,7 +304,7 @@ class Module(nn.Module):
             }
 
         except Exception as e:
-            print(f"Error loading task {task_path}: {e}")
+            print(f"Error loading task {task['task']}: {e}")
             return None
 
     def save_checkpoint(self, epoch, batch_count, optimizer, dout_path, is_epoch_end=False):
