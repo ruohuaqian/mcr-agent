@@ -830,13 +830,13 @@ class Module(Base):
 
     def extract_preds(self, out, batch, feat, clean_special_tokens=True):
         '''
-        output processing
+        Output processing
         '''
         pred = {}
-        for (ex, _), alow, alow_mask in zip(batch, feat['out_action_low'].max(2)[1].tolist(),
-                                            feat['out_action_low_mask']):
-            # remove padding tokens
-
+        for data_item, alow, alow_mask in zip(batch, feat['out_action_low'].max(2)[1].tolist(),
+                                              feat['out_action_low_mask']):
+            ex = data_item['ex']  # Extract the 'ex' field from the dictionary
+            # Remove padding tokens
             if self.pad in alow:
                 pad_start_idx = alow.index(self.pad)
                 alow = alow[:pad_start_idx]
@@ -848,7 +848,7 @@ class Module(Base):
                     alow = alow[:stop_start_idx]
                     alow_mask = alow_mask[:stop_start_idx]
 
-            # index to API actions
+            # Index to API actions
             words = self.vocab['action_low'].index2word(alow)
 
             p_mask = [alow_mask[t].detach().cpu().numpy() for t in range(alow_mask.shape[0])]
@@ -859,7 +859,6 @@ class Module(Base):
             }
 
         return pred
-
     def embed_action(self, action):
         '''
         embed low-level action
