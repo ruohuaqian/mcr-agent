@@ -28,12 +28,10 @@ DOUT_DEFAULT=${DRIVE_ROOT}/mcr-agent/exp/OEM_Training
 SEED=123
 # For streaming mode
 HUGGINGFACE_ID="byeonghwikim/abp_dataset"
-# For local mode
-DATA="$DATA_DEFAULT_LOCAL"
 SPLITS="$SPLITS_DEFAULT_JSON"
 PP_FOLDER="pp"
 SAVE_EVERY_EPOCH=0
-MODEL="OEM.models.model.seq2seq_im_mask"
+MODEL="OEM.models.model.seq2seq_im_mask_obj"
 GPU=1
 DOUT="$DOUT_DEFAULT"
 RESUME=""
@@ -78,7 +76,6 @@ while [[ $# -gt 0 ]]; do
     # Path and Mode controls
     --seed) SEED="$2"; shift 2;;
     --huggingface_id) HUGGINGFACE_ID="$2"; shift 2;;
-    --data) DATA="$2"; shift 2;;
     --splits) SPLITS="$2"; shift 2;;
     --pp_folder) PP_FOLDER="$2"; shift 2;;
     --save_every_epoch) SAVE_EVERY_EPOCH=1; shift;;
@@ -112,7 +109,6 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Key Paths:"
       echo "  --huggingface_id ID   Hugging Face dataset ID for streaming (default: $HUGGINGFACE_ID)."
-      echo "  --data PATH           Path to local data for non-streaming mode (default: $DATA_DEFAULT_LOCAL)."
       echo "  --splits PATH         Path to splits JSON file (default: $SPLITS_DEFAULT_JSON)."
       echo "  --dout PATH           Path to save model output (default: $DOUT_DEFAULT)."
       echo ""
@@ -151,6 +147,7 @@ CMD=( python "models/train/train_seq2seq_stream.py"
   --seed "$SEED"
   --splits "$SPLITS"
   --pp_folder "$PP_FOLDER"
+  --huggingface_id "$HUGGINGFACE_ID"
   --model "$MODEL"
   --dout "$DOUT"
   --batch "$BATCH"
@@ -173,12 +170,6 @@ CMD=( python "models/train/train_seq2seq_stream.py"
   --actor_dropout "$ACTOR_DROPOUT"
 )
 
-# Add the correct data source argument based on the mode
-if [[ "$USE_STREAMING" -eq 1 ]]; then
-  CMD+=( --data "$HUGGINGFACE_ID" ) # In streaming mode, --data is the Hub ID
-else
-  CMD+=( --data "$DATA" ) # In local mode, --data is the local path
-fi
 
 # Add optional boolean flags
 [[ "$SAVE_EVERY_EPOCH" -eq 1 ]] && CMD+=( --save_every_epoch )
