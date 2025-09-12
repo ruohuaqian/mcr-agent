@@ -14,7 +14,7 @@ if __name__ == '__main__':
 
     # settings
     parser.add_argument('--splits', type=str, default="data/splits/oct21.json")
-    parser.add_argument('--data', type=str, default="data/json_feat_2.1.0")
+    parser.add_argument('--huggingface_id', help='dataset huggingface id', default='byeonghwikim/abp_dataset')
     parser.add_argument('--reward_config', default='models/config/rewards.json')
     parser.add_argument('--eval_split', type=str, choices=['train', 'valid_seen', 'valid_unseen'])
     parser.add_argument('--nav_model_path', type=str, default="exp/pretrained/pretrained.pth")
@@ -27,11 +27,12 @@ if __name__ == '__main__':
     parser.add_argument('--clean_model_path', type=str, default="exp/pretrained/pretrained.pth")
     parser.add_argument('--object_model_path', type=str, default="exp/pretrained/pretrained.pth")
     parser.add_argument('--subgoal_model_path', type=str, default="exp/pretrained/pretrained.pth")
+    # parser.add_argument('--use_streaming_eval', action='store_true', help='Use streaming evaluation')
 
-    parser.add_argument('--nav_model', type=str, default='models.model.seq2seq_im_mask')
-    parser.add_argument('--sub_model', type=str, default='models.model.seq2seq_im_mask_sub')
-    parser.add_argument('--object_model', type=str, default='models.model.seq2seq_im_mask_obj')
-    parser.add_argument('--subgoal_pred_model', type=str, default='models.model.seq2seq_im_mask_subgoal_pred')
+    parser.add_argument('--nav_model', type=str, default='MasterPolicy.models.model.seq2seq_im_mask')
+    parser.add_argument('--sub_model', type=str, default='Interactions.models.model.seq2seq_im_mask_sub')
+    parser.add_argument('--object_model', type=str, default='OEM.models.model.seq2seq_im_mask_obj')
+    parser.add_argument('--subgoal_pred_model', type=str, default='PCC.models.model.seq2seq_im_mask')
     parser.add_argument('--preprocess', dest='preprocess', action='store_true')
     parser.add_argument('--shuffle', dest='shuffle', action='store_true')
     parser.add_argument('--gpu', dest='gpu', action='store_true')
@@ -54,12 +55,15 @@ if __name__ == '__main__':
 
     # parse arguments
     args = parser.parse_args()
-
+        # eval = EvalTask(args, manager)
+    from models.eval.stream_eval_task import StreamingEvalTask
     # eval mode
     if args.subgoals:
         eval = EvalSubgoals(args, manager)
     else:
-        eval = EvalTask(args, manager)
-
+    # 替换原有的评估调用
+        eval = StreamingEvalTask.run_streaming(
+            model, resnet, task_queue, args, lock, successes, failures, results
+        )
     # start threads
     eval.spawn_threads()

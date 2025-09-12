@@ -23,7 +23,7 @@ USE_STREAMING=1  # 默认启用流式模式
 
 BATCH=4
 EPOCH=20
-LR=1e-4
+LR=1e-3
 DECAY_EPOCH=10
 DHID=512
 DFRAME=$((3*7*7))
@@ -220,46 +220,3 @@ duration=$((end_time - start_time))
 echo "[INFO] Training completed successfully in $((duration / 60))m $((duration % 60))s"
 echo "[INFO] Model saved to: $DOUT"
 
-# ===================== Create summary =====================
-SUMMARY_FILE="${DOUT}/training_summary.txt"
-cat > "$SUMMARY_FILE" << EOF
-Training Summary
-================
-Date: $(date)
-Model: $MODEL
-HuggingFace Dataset: $HUGGINGFACE_ID
-Streaming Mode: $USE_STREAMING
-
-Hyperparameters:
-- Seed: $SEED
-- Batch size: $BATCH
-- Epochs: $EPOCH
-- Learning rate: $LR
-- Hidden size: $DHID
-- Embedding size: $DEMB
-
-Loss Weights:
-- Mask loss: $MASK_LOSS_WT
-- Action loss: $ACTION_LOSS_WT
-- Subgoal aux: $SUBGOAL_AUX_LOSS_WT
-- PM aux: $PM_AUX_LOSS_WT
-
-Dropouts:
-- Lang: $LANG_DROPOUT
-- Input: $INPUT_DROPOUT
-- Visual: $VIS_DROPOUT
-- Hidden state: $HSTATE_DROPOUT
-- Attention: $ATTN_DROPOUT
-- Actor: $ACTOR_DROPOUT
-
-Features:
-- Zero goal: $ZERO_GOAL
-- Zero instr: $ZERO_INSTR
-- Panoramic: $PANORAMIC
-- Orientation: $ORIENTATION
-- Panoramic concat: $PANORAMIC_CONCAT
-
-Training Time: $((duration / 60)) minutes $((duration % 60)) seconds
-EOF
-
-echo "[INFO] Training summary saved to: $SUMMARY_FILE"

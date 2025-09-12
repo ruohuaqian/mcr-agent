@@ -35,7 +35,6 @@ class Eval(object):
 
         # updated args
         nav_model.args.dout = self.args.nav_model_path.replace(self.args.nav_model_path.split('/')[-1], '')
-        nav_model.args.data = self.args.data if self.args.data else self.nav_model.args.data
 
         self.model = {'nav':nav_model.cuda()}
 
@@ -49,7 +48,6 @@ class Eval(object):
 
         # updated args
         pickup_model.args.dout = self.args.pickup_model_path.replace(self.args.pickup_model_path.split('/')[-1], '')
-        pickup_model.args.data = self.args.data if self.args.data else self.pickup_model.args.data
 
         self.model['pickup'] = pickup_model.cuda()
 
@@ -64,7 +62,6 @@ class Eval(object):
 
         # updated args
         put_model.args.dout = self.args.put_model_path.replace(self.args.put_model_path.split('/')[-1], '')
-        put_model.args.data = self.args.data if self.args.data else self.put_model.args.data
 
         self.model['put'] = put_model.cuda()
 
@@ -79,7 +76,6 @@ class Eval(object):
 
         # updated args
         heat_model.args.dout = self.args.heat_model_path.replace(self.args.heat_model_path.split('/')[-1], '')
-        heat_model.args.data = self.args.data if self.args.data else self.heat_model.args.data
 
         self.model['heat'] = heat_model.cuda()
 
@@ -94,7 +90,6 @@ class Eval(object):
 
         # updated args
         cool_model.args.dout = self.args.cool_model_path.replace(self.args.cool_model_path.split('/')[-1], '')
-        cool_model.args.data = self.args.data if self.args.data else self.cool_model.args.data
 
         self.model['cool'] = cool_model.cuda()
 
@@ -109,7 +104,6 @@ class Eval(object):
 
         # updated args
         clean_model.args.dout = self.args.clean_model_path.replace(self.args.clean_model_path.split('/')[-1], '')
-        clean_model.args.data = self.args.data if self.args.data else self.clean_model.args.data
 
         self.model['clean'] = clean_model.cuda()
         
@@ -124,7 +118,6 @@ class Eval(object):
 
         # updated args
         toggle_model.args.dout = self.args.toggle_model_path.replace(self.args.toggle_model_path.split('/')[-1], '')
-        toggle_model.args.data = self.args.data if self.args.data else self.toggle_model.args.data
 
         self.model['toggle'] = toggle_model.cuda()
 
@@ -139,7 +132,6 @@ class Eval(object):
 
         # updated args
         slice_model.args.dout = self.args.slice_model_path.replace(self.args.slice_model_path.split('/')[-1], '')
-        slice_model.args.data = self.args.data if self.args.data else self.slice_model.args.data
 
         self.model['slice'] = slice_model.cuda()
 
@@ -154,7 +146,6 @@ class Eval(object):
 
         # updated args
         object_model.args.dout = self.args.object_model_path.replace(self.args.object_model_path.split('/')[-1], '')
-        object_model.args.data = self.args.data if self.args.data else self.object_model.args.data
 
         self.model['object'] = object_model.cuda()
 
@@ -169,7 +160,6 @@ class Eval(object):
 
         # updated args
         subgoal_model.args.dout = self.args.subgoal_model_path.replace(self.args.subgoal_model_path.split('/')[-1], '')
-        subgoal_model.args.data = self.args.data if self.args.data else self.subgoal_model.args.data
 
         self.model['subgoal'] = subgoal_model.cuda()
 
@@ -269,4 +259,7 @@ class Eval(object):
         raise NotImplementedError()
 
     def create_stats(self):
+        raise NotImplementedError()
+
+    def run_streaming(cls, model, resnet, task_queue, args, lock, successes, failures, results):
         raise NotImplementedError()
