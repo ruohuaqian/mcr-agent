@@ -7,6 +7,7 @@ from data.preprocess import Dataset
 from importlib import import_module
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from OEM.models.utils.helper_utils import optimizer_to
+from huggingface_hub import hf_hub_download
 
 torch.backends.cudnn.enabled = False
 
@@ -88,19 +89,18 @@ if __name__ == '__main__':
         pprint.pprint({k: len(v) for k, v in splits.items()})
 
     # preprocess and save
-    if args.preprocess:
-        print(
-            "\nPreprocessing dataset and saving to %s folders ... This will take a while. Do this once as required." % args.pp_folder)
-        dataset = Dataset(args, None)
-        dataset.preprocess_splits(splits)
-        vocab = torch.load(os.path.join(args.dout, "%s.vocab" % args.pp_folder))
-    else:
-        vocab = torch.load(os.path.join(args.data, "%s.vocab" % args.pp_folder))
-
+    vocab_path = hf_hub_download(
+        repo_id="byeonghwikim/abp_dataset",
+        filename="%s.vocab" % args.pp_folder,
+        repo_type="dataset"
+    )
+    print(f"Vocab successfully downloaded to: {vocab_path}")
+    vocab = torch.load(vocab_path)
     with open('objnav_cls.txt', 'r') as f:
         obj_list = f.readlines()
     vocab['objnav'] = Vocab([w.strip().lower() for w in obj_list] + ['<<nav>>', '<<pad>>'])
     vocab['action_low'].word2index(['Manipulate'], train=True)
+    print("Vocab loaded successfully.")
 
     # load model
     M = import_module(args.model)
@@ -118,4 +118,4 @@ if __name__ == '__main__':
             optimizer_to(optimizer, torch.device('cuda'))
 
     # start train loop
-    model.run_train(splits, optimizer=optimizer)
+    model.run_train_stream(splits, optimizer=optimizer)

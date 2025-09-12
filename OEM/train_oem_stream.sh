@@ -9,7 +9,7 @@ SPLITS_DEFAULT_JSON=${DRIVE_ROOT}/data/splits/oct21.json
 
 # ========= default superparameters（与 argparse 对齐）=========
 SEED=123
-DATA="$DATA_DEFAULT_JSON"
+HUGGINGFACE_ID="byeonghwikim/abp_dataset"  # 默认Hugging Face数据集ID
 SPLITS="$SPLITS_DEFAULT_JSON"
 PREPROCESS=0
 PP_FOLDER=pp
@@ -19,9 +19,10 @@ GPU=1
 DOUT="${DRIVE_ROOT}/exp/MCR_Agent/OEM"
 RESUME=""
 USE_TEMPLATED_GOALS=0
+USE_STREAMING=1  # 默认启用流式模式
 
 BATCH=4
-EPOCH=30
+EPOCH=20
 LR=1e-4
 DECAY_EPOCH=10
 DHID=512
@@ -55,7 +56,7 @@ DATASET_FRACTION=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --seed) SEED="$2"; shift 2;;
-    --data) DATA="$2"; shift 2;;
+    --huggingface_id) HUGGINGFACE_ID="$2"; shift 2;;
     --splits) SPLITS="$2"; shift 2;;
     --preprocess) PREPROCESS=1; shift;;
     --pp_folder) PP_FOLDER="$2"; shift 2;;
@@ -66,6 +67,7 @@ while [[ $# -gt 0 ]]; do
     --dout) DOUT="$2"; shift 2;;
     --resume) RESUME="$2"; shift 2;;
     --use_templated_goals) USE_TEMPLATED_GOALS=1; shift;;
+    --use_streaming) USE_STREAMING=1; shift;;
 
     --batch) BATCH="$2"; shift 2;;
     --epoch) EPOCH="$2"; shift 2;;
@@ -99,21 +101,34 @@ while [[ $# -gt 0 ]]; do
     --dataset_fraction) DATASET_FRACTION="$2"; shift 2;;
 
     --help|-h)
-      echo "Usage: $0 [--data PATH] [--splits PATH] [--dout PATH] [--model NAME] [--gpu|--no-gpu] ..."
+      echo "Usage: $0 [--huggingface_id ID] [--splits PATH] [--dout PATH] [--model NAME] [--use_streaming] ..."
+      echo ""
+      echo "Streaming Mode Options:"
+      echo "  --huggingface_id      Hugging Face dataset ID (default: $HUGGINGFACE_ID)"
+      echo "  --use_streaming       Enable Hugging Face streaming mode (default: enabled)"
+      echo "  --no-streaming        Disable streaming mode"
+      echo ""
+      echo "Training Parameters:"
+      echo "  --batch               Batch size (default: $BATCH)"
+      echo "  --epoch               Number of epochs (default: $EPOCH)"
+      echo "  --lr                  Learning rate (default: $LR)"
+      echo "  --dhid                Hidden layer size (default: $DHID)"
+      echo ""
+      echo "Other options same as before"
       exit 0;;
-    *)
-      echo "[WARN] Unknown option: $1"; shift;;
+    *) echo "[WARN] Unknown option: $1"; shift;;
   esac
 done
 
-# ========= 数据路径自动回退 =========
-if [[ ! -d "$DATA" ]]; then
-  if [[ -d "${DRIVE_ROOT}/json_feat_2.1.0" ]]; then
-    DATA="${DRIVE_ROOT}/json_feat_2.1.0"
-    echo "[INFO] Use Google Drive dataset: $DATA"
+# ===================== Paths & env =====================
+# 检查splits文件是否存在
+if [[ ! -f "$SPLITS" ]]; then
+  if [[ -f "${DRIVE_ROOT}/mcr-agent/data/splits/oct21.json" ]]; then
+    SPLITS="${DRIVE_ROOT}/mcr-agent/data/splits/oct21.json"
+    echo "[INFO] Using Google Drive splits: $SPLITS"
   else
-    DATA="$DATA_DEFAULT_JSON"
-    echo "[INFO] Use local dataset: $DATA"
+    echo "[WARN] Splits file not found: $SPLITS"
+    echo "[INFO] Will attempt to use splits from Hugging Face dataset"
   fi
 fi
 
@@ -131,7 +146,7 @@ cd "${MCR_ROOT}/OEM"
 # ========= 组装训练命令（逐项对齐 argparse）=========
 CMD=( python models/train/train_seq2seq.py
   --seed "$SEED"
-  --data "$DATA"
+  --huggingface_id "$HUGGINGFACE_ID"
   --splits "$SPLITS"
   --pp_folder "$PP_FOLDER"
   --model "$MODEL"
@@ -162,6 +177,7 @@ CMD=( python models/train/train_seq2seq.py
 [[ "$GPU" -eq 1 ]] && CMD+=( --gpu )
 [[ -n "$RESUME" ]] && CMD+=( --resume "$RESUME" )
 [[ "$USE_TEMPLATED_GOALS" -eq 1 ]] && CMD+=( --use_templated_goals )
+[[ "$USE_STREAMING" -eq 1 ]] && CMD+=( --use_streaming )
 [[ "$ZERO_GOAL" -eq 1 ]] && CMD+=( --zero_goal )
 [[ "$ZERO_INSTR" -eq 1 ]] && CMD+=( --zero_instr )
 [[ "$DEC_TEACHER_FORCING" -eq 1 ]] && CMD+=( --dec_teacher_forcing )
@@ -175,5 +191,52 @@ CMD=( python models/train/train_seq2seq.py
 echo "[INFO] MCR_ROOT    = $MCR_ROOT"
 echo "[INFO] DOUT        = $DOUT"
 echo "[INFO] MODEL       = $MODEL"
+echo "[INFO] HF_ID       = $HUGGINGFACE_ID"
+echo "[INFO] STREAMING   = $USE_STREAMING"
+echo "[INFO] BATCH       = $BATCH"
+echo "[INFO] EPOCH       = $EPOCH"
 echo "[INFO] CMD: ${CMD[*]}"
-"${CMD[@]}"
+
+# ===================== Create summary =====================
+SUMMARY_FILE="${DOUT}/training_summary.txt"
+cat > "$SUMMARY_FILE" << EOF
+Training Summary
+================
+Date: $(date)
+Model: $MODEL
+HuggingFace Dataset: $HUGGINGFACE_ID
+Streaming Mode: $USE_STREAMING
+
+Hyperparameters:
+- Seed: $SEED
+- Batch size: $BATCH
+- Epochs: $EPOCH
+- Learning rate: $LR
+- Hidden size: $DHID
+- Embedding size: $DEMB
+
+Loss Weights:
+- Mask loss: $MASK_LOSS_WT
+- Action loss: $ACTION_LOSS_WT
+- Subgoal aux: $SUBGOAL_AUX_LOSS_WT
+- PM aux: $PM_AUX_LOSS_WT
+
+Dropouts:
+- Lang: $LANG_DROPOUT
+- Input: $INPUT_DROPOUT
+- Visual: $VIS_DROPOUT
+- Hidden state: $HSTATE_DROPOUT
+- Attention: $ATTN_DROPOUT
+- Actor: $ACTOR_DROPOUT
+
+Features:
+- Zero goal: $ZERO_GOAL
+- Zero instr: $ZERO_INSTR
+- Panoramic: $PANORAMIC
+- Orientation: $ORIENTATION
+- Panoramic concat: $PANORAMIC_CONCAT
+
+Training Time: $((duration / 60)) minutes $((duration % 60)) seconds
+EOF
+
+echo "[INFO] Training summary saved to: $SUMMARY_FILE"
