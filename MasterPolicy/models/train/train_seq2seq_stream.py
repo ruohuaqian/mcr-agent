@@ -8,6 +8,7 @@ from importlib import import_module
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from MasterPolicy.models.utils.helper_utils import optimizer_to
 from huggingface_hub import hf_hub_download
+from MasterPolicy.models.model.navigation_streaming_trainer import NavigationStreamingTrainer
 
 
 torch.backends.cudnn.enabled = False
