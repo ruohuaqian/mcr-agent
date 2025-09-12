@@ -74,10 +74,6 @@ if __name__ == '__main__':
     args.dout = args.dout.format(**vars(args))
     torch.manual_seed(args.seed)
 
-    # check if dataset has been preprocessed
-    if not os.path.exists(os.path.join(args.data, "%s.vocab" % args.pp_folder)) and not args.preprocess:
-        raise Exception("Dataset not processed; run with --preprocess")
-
     # make output dir
     pprint.pprint(args)
     if not os.path.isdir(args.dout):
