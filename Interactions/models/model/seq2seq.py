@@ -261,13 +261,13 @@ class Module(nn.Module):
             else:
                 yield self.load_streaming_task(task, False)
 
-    def load_streaming_task(self, task_path, swapColor):
+    def load_streaming_task(self, task, swapColor):
         '''
         流式加载单个任务数据
         '''
         try:
             # 加载JSON数据
-            json_filename = f"{task_path}/pp/ann_{repeat_idx}.json"  # 假设repeat_idx=0
+            json_filename = f"{task['task']}/pp/ann_{task['repeat_idx']}.json"  # 假设repeat_idx=0
             json_url = hf_hub_url(
                 repo_id=self.args.huggingface_id,
                 filename=json_filename,
@@ -298,8 +298,8 @@ class Module(nn.Module):
             return {
                 'ex': ex,
                 'im': im,
-                'task_path': task_path,
-                'repeat_idx': repeat_idx,
+                'task_path': task['task'],
+                'repeat_idx': task['repeat_idx'],
                 'swapColor': swapColor
             }
 
