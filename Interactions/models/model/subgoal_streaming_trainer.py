@@ -20,7 +20,7 @@ class SubgoalStreamingTrainer:
         self.optimizer = optimizer
         self.split = split
 
-    def run_train(self, splits, optimizer = self.optimizer):
+    def run_train(self, splits):
         '''
         流式训练循环
         '''
@@ -50,7 +50,7 @@ class SubgoalStreamingTrainer:
             valid_unseen_stream = limited_stream(valid_unseen_stream, 1)
 
         # 初始化优化器和记录器
-        optimizer = optimizer or torch.optim.Adam(self.parameters(), lr=args.lr)
+        optimizer = self.optimizer or torch.optim.Adam(self.parameters(), lr=args.lr)
         self.summary_writer = SummaryWriter(log_dir=args.dout)
 
         # 保存配置
