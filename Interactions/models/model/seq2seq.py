@@ -11,7 +11,8 @@ from tqdm import trange, tqdm
 from Interactions.models.model import constants
 from torch.utils.data import DataLoader
 from datasets import Dataset, DatasetDict
-from huggingface_hub import hf_hub_download
+from huggingface_hub import hf_hub_url
+from huggingface_hub import login
 from functools import partial
 
 classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp',
@@ -164,11 +165,16 @@ class Module(nn.Module):
                     for k, v in stats[split].items():
                         self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
             pprint.pprint(stats)
+    def setup_hf_auth(self):
+        # 方法1: 使用环境变量
+        if os.environ.get('HF_TOKEN'):
+            login(token=os.environ.get('HF_TOKEN'))
 
     def run_train_stream(self, splits, args=None, optimizer=None):
         '''
         流式训练方法
         '''
+        self.setup_hf_auth()
         args = args or self.args
 
         # 创建流式数据集
