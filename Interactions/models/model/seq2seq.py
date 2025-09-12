@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 from datasets import Dataset, DatasetDict
 from huggingface_hub import hf_hub_download
 from functools import partial
-from subgoal_streaming_trainer import SubgoalStreamingTrainer
+from Interactions.models.model.subgoal_streaming_trainer import SubgoalStreamingTrainer
 
 classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp',
                                      'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
