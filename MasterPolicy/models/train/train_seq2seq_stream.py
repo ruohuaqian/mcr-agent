@@ -8,7 +8,6 @@ from importlib import import_module
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from MasterPolicy.models.utils.helper_utils import optimizer_to
 from huggingface_hub import hf_hub_download
-from MasterPolicy.models.model.navigation_streaming_trainer import NavigationStreamingTrainer
 
 
 torch.backends.cudnn.enabled = False
@@ -114,12 +113,8 @@ if __name__ == '__main__':
         model = model.to(torch.device('cuda'))
         if not optimizer is None:
             optimizer_to(optimizer, torch.device('cuda'))
-
-        # 创建流式训练器
-    trainer = NavigationStreamingTrainer(args, vocab, model)
-
     # 加载数据分割
     splits = load_splits(args.splits)
 
     # 开始训练
-    trainer.run_train(splits)
+    model.run_train_stream(splits)
