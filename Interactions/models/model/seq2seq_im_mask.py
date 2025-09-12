@@ -513,9 +513,48 @@ class Module(Base):
 
                     sac_ind += len(s)
                     sfr_ind += (len(s) + 1)
+                if self.orientation:
+                    import math
+                    def get_orientation(d):
+                        if d == 'left':
+                            h, v = -math.pi / 2, 0.0
+                        elif d == 'up':
+                            h, v = 0.0, -math.pi / 12
+                        elif d == 'down':
+                            h, v = 0.0, math.pi / 12
+                        elif d == 'right':
+                            h, v = math.pi / 2, 0.0
+                        else:
+                            h, v = 0.0, 0.0
 
+                        orientation = torch.cat([
+                            torch.cos(torch.ones(1) * (h)),
+                            torch.sin(torch.ones(1) * (h)),
+                            torch.cos(torch.ones(1) * (v)),
+                            torch.sin(torch.ones(1) * (v)),
+                        ]).unsqueeze(-1).unsqueeze(-1).repeat(1, 7, 7)
+
+                        return orientation
+
+                    feat['frames'][-1] = torch.cat([
+                        feat['frames'][-1], get_orientation('front').repeat(len(feat['frames'][-1]), 1, 1, 1)
+                    ], dim=1)
+                    feat['frames_left'][-1] = torch.cat([
+                        feat['frames_left'][-1], get_orientation('left').repeat(len(feat['frames_left'][-1]), 1, 1, 1)
+                    ], dim=1)
+                    feat['frames_up'][-1] = torch.cat([
+                        feat['frames_up'][-1], get_orientation('up').repeat(len(feat['frames_up'][-1]), 1, 1, 1)
+                    ], dim=1)
+                    feat['frames_down'][-1] = torch.cat([
+                        feat['frames_down'][-1], get_orientation('down').repeat(len(feat['frames_down'][-1]), 1, 1, 1)
+                    ], dim=1)
+                    feat['frames_right'][-1] = torch.cat([
+                        feat['frames_right'][-1],
+                        get_orientation('right').repeat(len(feat['frames_right'][-1]), 1, 1, 1)
+                    ], dim=1)
         # 张量化和填充（保持原有逻辑）
         return self._tensorize_and_pad(feat, device)
+
     def _tensorize_and_pad(self, feat, device):
         '''
         张量化和填充逻辑
