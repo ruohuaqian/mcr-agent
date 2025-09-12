@@ -11,8 +11,15 @@ class ALFREDStreamingDataset:
         self.task_list = task_list
         self.feat_pt = feat_pt
         self.args = args
+        self.setup_hf_auth()
+
+    def setup_hf_auth(self):
+        # 方法1: 使用环境变量
+        if os.environ.get('HF_TOKEN'):
+            login(token=os.environ.get('HF_TOKEN'))
 
     def __iter__(self):
+
         for task_info in self.task_list:
             task_path = task_info['task']
             repeat_idx = task_info['repeat_idx']
