@@ -236,8 +236,8 @@ class Module(nn.Module):
                 total_train_loss.append(float(sum_loss))
                 train_iter += len(batch)
 
-                # 每 N 个batch进行验证
-                if batch_idx % args.validation_interval == 0:
+                # 每 256 个batch进行验证
+                if batch_idx % 256 == 0:
                     self.validate(valid_seen_stream, valid_unseen_stream, train_iter)
 
             # 保存检查点
