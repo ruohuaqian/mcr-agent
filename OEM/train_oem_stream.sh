@@ -146,14 +146,8 @@ if [[ "$USE_STREAMING" -eq 1 ]]; then
 fi
 
 # ===================== Assemble Python Command =====================
-# Use the appropriate Python script based on the mode
-if [[ "$USE_STREAMING" -eq 1 ]]; then
-    TRAIN_SCRIPT="models/train/train_seq2seq_stream.py" # Your new streaming script
-else
-    TRAIN_SCRIPT="models/train/train_seq2seq.py" # Your original script
-fi
 
-CMD=( python "$TRAIN_SCRIPT"
+CMD=( python "models/train/train_seq2seq_stream.py"
   --seed "$SEED"
   --splits "$SPLITS"
   --pp_folder "$PP_FOLDER"
