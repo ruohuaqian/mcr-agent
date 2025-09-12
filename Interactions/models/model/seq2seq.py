@@ -267,7 +267,7 @@ class Module(nn.Module):
         '''
         try:
             # 加载JSON数据
-            json_filename = f"{task_path}/pp/ann_0.json"  # 假设repeat_idx=0
+            json_filename = f"{task_path}/pp/ann_{repeat_idx}.json"  # 假设repeat_idx=0
             json_url = hf_hub_url(
                 repo_id=self.args.huggingface_id,
                 filename=json_filename,
@@ -299,6 +299,7 @@ class Module(nn.Module):
                 'ex': ex,
                 'im': im,
                 'task_path': task_path,
+                'repeat_idx': repeat_idx,
                 'swapColor': swapColor
             }
 
