@@ -6,6 +6,7 @@ import json
 import collections
 import numpy as np
 from tqdm import trange
+import pytorch
 
 
 class NavigationStreamingTrainer(nn.Module):
@@ -24,117 +25,117 @@ class NavigationStreamingTrainer(nn.Module):
             setattr(self, name, param)
 
 
-def run_train(self, splits, optimizer=None):
-    '''
-    流式训练循环 - 导航版本
-    '''
-    args = self.args
+    def run_train(self, splits, optimizer=None):
+        '''
+        流式训练循环 - 导航版本
+        '''
+        args = self.args
 
-    # 创建流式数据集
-    train_stream = self.create_streaming_dataset(
-        splits['train'],
-        augment=True  # 启用数据增强
-    )
-    valid_seen_stream = self.create_streaming_dataset(splits['valid_seen'])
-    valid_unseen_stream = self.create_streaming_dataset(splits['valid_unseen'])
-
-    # 调试模式处理
-    if self.args.fast_epoch:
-        def limited_stream(stream, limit):
-            count = 0
-            for item in stream:
-                if count >= limit:
-                    break
-                yield item
-                count += 1
-
-        train_stream = limited_stream(train_stream, 16)
-        valid_seen_stream = limited_stream(valid_seen_stream, 1)
-        valid_unseen_stream = limited_stream(valid_unseen_stream, 1)
-
-    # 数据集分数处理
-    if self.args.dataset_fraction > 0:
-        def fraction_stream(stream, fraction):
-            total_count = 0
-            limit = int(len(splits['train']) * fraction * 0.7)
-            for item in stream:
-                if total_count >= limit:
-                    break
-                yield item
-                total_count += 1
-
-        train_stream = fraction_stream(train_stream, self.args.dataset_fraction)
-
-    # 初始化优化器
-    optimizer = optimizer or torch.optim.Adam(self.model.parameters(), lr=args.lr)
-    self.summary_writer = SummaryWriter(log_dir=args.dout)
-
-    # 保存配置
-    with open(os.path.join(args.dout, 'config.json'), 'wt') as f:
-        json.dump(vars(args), f, indent=2)
-
-    print("Saving to: %s" % args.dout)
-    train_iter = 0
-
-    for epoch in trange(0, args.epoch, desc='epoch'):
-        m_train = collections.defaultdict(list)
-        self.model.train()
-        self.adjust_lr(optimizer, args.lr, epoch, args.decay_epoch)
-        total_train_loss = []
-
-        # 随机打乱流式数据（通过重新创建数据集）
-        epoch_train_stream = self.create_streaming_dataset(
+        # 创建流式数据集
+        train_stream = self.create_streaming_dataset(
             splits['train'],
-            augment=True,
-            shuffle=True
+            augment=True  # 启用数据增强
         )
+        valid_seen_stream = self.create_streaming_dataset(splits['valid_seen'])
+        valid_unseen_stream = self.create_streaming_dataset(splits['valid_unseen'])
 
-        batch_count = 0
-        for batch in self.streaming_iterate(epoch_train_stream, args.batch):
-            try:
-                feat = self.streaming_featurize(batch)
+        # 调试模式处理
+        if self.args.fast_epoch:
+            def limited_stream(stream, limit):
+                count = 0
+                for item in stream:
+                    if count >= limit:
+                        break
+                    yield item
+                    count += 1
 
-                out = self.model.forward(feat)
-                preds = self.model.extract_preds(out, batch, feat)
-                loss = self.model.compute_loss(out, batch, feat)
+            train_stream = limited_stream(train_stream, 16)
+            valid_seen_stream = limited_stream(valid_seen_stream, 1)
+            valid_unseen_stream = limited_stream(valid_unseen_stream, 1)
 
-                # 记录损失
-                for k, v in loss.items():
-                    ln = 'loss_' + k
-                    m_train[ln].append(v.item())
-                    self.summary_writer.add_scalar('train/' + ln, v.item(), train_iter)
+        # 数据集分数处理
+        if self.args.dataset_fraction > 0:
+            def fraction_stream(stream, fraction):
+                total_count = 0
+                limit = int(len(splits['train']) * fraction * 0.7)
+                for item in stream:
+                    if total_count >= limit:
+                        break
+                    yield item
+                    total_count += 1
 
-                # 反向传播
-                optimizer.zero_grad()
-                sum_loss = sum(loss.values())
-                sum_loss.backward()
-                optimizer.step()
+            train_stream = fraction_stream(train_stream, self.args.dataset_fraction)
 
-                self.summary_writer.add_scalar('train/loss', sum_loss, train_iter)
-                total_train_loss.append(float(sum_loss.detach().cpu()))
-                train_iter += len(batch)
-                batch_count += 1
+        # 初始化优化器
+        optimizer = optimizer or torch.optim.Adam(self.model.parameters(), lr=args.lr)
+        self.summary_writer = SummaryWriter(log_dir=args.dout)
 
-            except Exception as e:
-                print(f"Error in batch processing: {e}")
-                continue
+        # 保存配置
+        with open(os.path.join(args.dout, 'config.json'), 'wt') as f:
+            json.dump(vars(args), f, indent=2)
 
-        # 保存检查点
-        stats = {'epoch': epoch}
-        if args.save_every_epoch:
-            fsave = os.path.join(args.dout, 'net_epoch_%d.pth' % epoch)
-        else:
-            fsave = os.path.join(args.dout, 'latest.pth')
+        print("Saving to: %s" % args.dout)
+        train_iter = 0
 
-        self.save_checkpoint(epoch, batch_count, optimizer, args.dout)
+        for epoch in trange(0, args.epoch, desc='epoch'):
+            m_train = collections.defaultdict(list)
+            self.model.train()
+            self.adjust_lr(optimizer, args.lr, epoch, args.decay_epoch)
+            total_train_loss = []
 
-        # 记录统计信息
-        for split in stats.keys():
-            if isinstance(stats[split], dict):
-                for k, v in stats[split].items():
-                    self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
+            # 随机打乱流式数据（通过重新创建数据集）
+            epoch_train_stream = self.create_streaming_dataset(
+                splits['train'],
+                augment=True,
+                shuffle=True
+            )
 
-        print(f"Epoch {epoch} completed")
+            batch_count = 0
+            for batch in self.streaming_iterate(epoch_train_stream, args.batch):
+                try:
+                    feat = self.streaming_featurize(batch)
+
+                    out = self.model.forward(feat)
+                    preds = self.model.extract_preds(out, batch, feat)
+                    loss = self.model.compute_loss(out, batch, feat)
+
+                    # 记录损失
+                    for k, v in loss.items():
+                        ln = 'loss_' + k
+                        m_train[ln].append(v.item())
+                        self.summary_writer.add_scalar('train/' + ln, v.item(), train_iter)
+
+                    # 反向传播
+                    optimizer.zero_grad()
+                    sum_loss = sum(loss.values())
+                    sum_loss.backward()
+                    optimizer.step()
+
+                    self.summary_writer.add_scalar('train/loss', sum_loss, train_iter)
+                    total_train_loss.append(float(sum_loss.detach().cpu()))
+                    train_iter += len(batch)
+                    batch_count += 1
+
+                except Exception as e:
+                    print(f"Error in batch processing: {e}")
+                    continue
+
+            # 保存检查点
+            stats = {'epoch': epoch}
+            if args.save_every_epoch:
+                fsave = os.path.join(args.dout, 'net_epoch_%d.pth' % epoch)
+            else:
+                fsave = os.path.join(args.dout, 'latest.pth')
+
+            self.save_checkpoint(epoch, batch_count, optimizer, args.dout)
+
+            # 记录统计信息
+            for split in stats.keys():
+                if isinstance(stats[split], dict):
+                    for k, v in stats[split].items():
+                        self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
+
+            print(f"Epoch {epoch} completed")
 
     def create_streaming_dataset(self, task_list, augment=False, shuffle=False):
         '''
