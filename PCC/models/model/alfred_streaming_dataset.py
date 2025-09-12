@@ -3,6 +3,7 @@ import requests
 import io
 import torch
 import json
+import os
 
 
 class ALFREDStreamingDataset:
