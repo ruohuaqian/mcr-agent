@@ -331,7 +331,8 @@ class Module(Base):
             if data_item is None:
                 self._add_empty_features(feat, device)  # 传递设备信息
                 continue
-
+            ex = data_item['ex']
+            im = data_item['im']
             try:
                 # 辅助特征提取
                 action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
@@ -449,18 +450,18 @@ class Module(Base):
                 # 图像特征处理 - make sure 在CPU上处理，后续会转移到正确设备
                 val_indices = val_action_high.nonzero()[0]
 
-                if len(im_data) >= 5 and len(val_indices) > 0:
+                if len(im) >= 5 and len(val_indices) > 0:
                     try:
                         # 确保索引在有效范围内
-                        valid_indices = val_indices[val_indices < len(im_data[0])]
+                        valid_indices = val_indices[val_indices < len(im[0])]
 
                         if len(valid_indices) > 0:
                             # 保持在CPU上，后续统一转移设备
-                            feat['frames'].append(im_data[2][valid_indices].cpu())  # 主视角
-                            feat['frames_left'].append(im_data[0][valid_indices].cpu())  # 左侧
-                            feat['frames_up'].append(im_data[1][valid_indices].cpu())  # 上方
-                            feat['frames_down'].append(im_data[3][valid_indices].cpu())  # 下方
-                            feat['frames_right'].append(im_data[4][valid_indices].cpu())  # 右侧
+                            feat['frames'].append(im[2][valid_indices].cpu())  # 主视角
+                            feat['frames_left'].append(im[0][valid_indices].cpu())  # 左侧
+                            feat['frames_up'].append(im[1][valid_indices].cpu())  # 上方
+                            feat['frames_down'].append(im[3][valid_indices].cpu())  # 下方
+                            feat['frames_right'].append(im[4][valid_indices].cpu())  # 右侧
                         else:
                             self._add_empty_image_features(feat, device)
 

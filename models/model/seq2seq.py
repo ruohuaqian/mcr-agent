@@ -39,6 +39,8 @@ class Module(nn.Module):
         # summary self.writer
         self.summary_writer = None
 
+    # def run_train_streaming(self, splits, args=None, optimizer=None):
+
     def run_train(self, splits, args=None, optimizer=None):
         '''
         training loop

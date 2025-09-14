@@ -165,43 +165,9 @@ class Module(nn.Module):
         self.setup_hf_auth()
         args = self.args
 
-        # 创建流式数据集
-        train_stream = self.create_streaming_dataset(
-            splits['train'],
-            augment=True  # 启用数据增强
-        )
-        valid_seen_stream = self.create_streaming_dataset(splits['valid_seen'])
-        valid_unseen_stream = self.create_streaming_dataset(splits['valid_unseen'])
-
-        # 调试模式处理
-        if self.args.fast_epoch:
-            def limited_stream(stream, limit):
-                count = 0
-                for item in stream:
-                    if count >= limit:
-                        break
-                    yield item
-                    count += 1
-
-            train_stream = limited_stream(train_stream, 16)
-            valid_seen_stream = limited_stream(valid_seen_stream, 1)
-            valid_unseen_stream = limited_stream(valid_unseen_stream, 1)
-
-        # 数据集分数处理
-        if self.args.dataset_fraction > 0:
-            def fraction_stream(stream, fraction):
-                total_count = 0
-                limit = int(len(splits['train']) * fraction * 0.7)
-                for item in stream:
-                    if total_count >= limit:
-                        break
-                    yield item
-                    total_count += 1
-
-            train_stream = fraction_stream(train_stream, self.args.dataset_fraction)
-
         # 初始化优化器
         optimizer = optimizer or torch.optim.Adam(self.parameters(), lr=args.lr)
+
         self.summary_writer = SummaryWriter(log_dir=args.dout)
 
         # 保存配置
@@ -214,23 +180,76 @@ class Module(nn.Module):
         for epoch in trange(0, args.epoch, desc='epoch'):
             m_train = collections.defaultdict(list)
             self.train()
-            self.adjust_lr(optimizer, args.lr, epoch, args.decay_epoch)
+            self.adjust_lr(optimizer, args.lr, epoch, decay_epoch=args.decay_epoch)
             total_train_loss = []
 
-            # 随机打乱流式数据（通过重新创建数据集）
+            # random the stream（by recreate the original dataset）
             epoch_train_stream = self.create_streaming_dataset(
                 splits['train'],
                 augment=True,
                 shuffle=True
             )
+            epoch_valid_seen_stream = self.create_streaming_dataset(
+                splits['valid_seen'],
+                augment=True,
+                shuffle=True)
 
-            batch_count = 0
+            epoch_valid_unseen_stream = self.create_streaming_dataset(
+                splits['valid_unseen'],
+                augment=True,
+                shuffle=True)
+
+            if self.args.dataset_fraction > 0:
+                def fraction_stream(stream, fraction, split_name):
+                    total_count = 0
+                    if split_name == 'train':
+                        limit = int(len(splits['train']) * fraction * 0.7)
+                    else:
+                        limit = int(len(splits[split_name]* 0.3)/2)
+                    for item in stream:
+                        if total_count >= limit:
+                            break
+                        yield item
+                        total_count += 1
+
+                epoch_train_stream = fraction_stream(epoch_train_stream, self.args.dataset_fraction, 'train')
+                epoch_valid_seen_stream = fraction_stream(epoch_valid_seen_stream, self.args.dataset_fraction, 'valid_seen')
+                epoch_valid_unseen_stream = fraction_stream(epoch_valid_unseen_stream, self.args.dataset_fraction, 'valid_unseen')
+
+            if self.args.fast_epoch:
+                def limited_stream(data_stream, limit, mode='first'):
+                    if mode == 'first':
+                        # 取前limit个
+                        count = 0
+                        for item in data_stream:
+                            if count >= limit:
+                                break
+                            yield item
+                            count += 1
+
+                    elif mode == 'last':
+                        # use buffer to get last limit
+                        buffer = []
+                        for item in data_stream:
+                            buffer.append(item)
+                            if len(buffer) > limit:
+                                buffer.pop(0)  # 保持缓冲区大小为limit
+
+                        for item in buffer:
+                            yield item
+
+                # equal to train = train[-16:]
+                epoch_train_stream = limited_stream(epoch_train_stream, 16, 'last')
+                # equal to valid_seen = valid_seen[:1]
+                epoch_valid_seen_stream = limited_stream(epoch_valid_seen_stream, 1, 'first')
+                # equal to valid_unseen = valid_unseen[:1]
+                epoch_valid_unseen_stream = limited_stream(epoch_valid_unseen_stream, 1, 'first')
+
             for batch in self.streaming_iterate(epoch_train_stream, args.batch):
                 try:
                     feat = self.streaming_featurize(batch)
 
                     out = self.forward(feat)
-                    preds = self.extract_preds(out, batch, feat)
                     loss = self.compute_loss(out, batch, feat)
 
                     # 记录损失
@@ -247,8 +266,7 @@ class Module(nn.Module):
 
                     self.summary_writer.add_scalar('train/loss', sum_loss, train_iter)
                     total_train_loss.append(float(sum_loss.detach().cpu()))
-                    train_iter += len(batch)
-                    batch_count += 1
+                    train_iter += self.args.batch
 
                 except Exception as e:
                     print(f"Error in batch processing: {e}")
@@ -257,15 +275,25 @@ class Module(nn.Module):
             # 保存检查点
             stats = {'epoch': epoch}
 
-            self.save_checkpoint(epoch, batch_count, optimizer, args.dout)
+            # save the latest checkpoint
+            if args.save_every_epoch:
+                fsave = os.path.join(args.dout, 'net_epoch_%d.pth' % epoch)
+            else:
+                fsave = os.path.join(args.dout, 'latest.pth')
+            torch.save({
+                'metric': stats,  # stats,
+                'model': self.state_dict(),
+                'optim': optimizer.state_dict(),
+                'args': self.args,
+                'vocab': self.vocab,
+            }, fsave)
 
-            # 记录统计信息
+            # write stats
             for split in stats.keys():
                 if isinstance(stats[split], dict):
                     for k, v in stats[split].items():
                         self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
-
-            print(f"Epoch {epoch} completed")
+            pprint.pprint(stats)
 
     def create_streaming_dataset(self, task_list, augment=False, shuffle=False):
         '''
@@ -374,7 +402,7 @@ class Module(nn.Module):
             yield current_batch
 
 
-    def save_checkpoint(self, epoch, batch_count, optimizer, dout_path):
+    def save_checkpoint(self, stat, batch_count, optimizer, dout_path):
         '''
         保存检查点
         '''
@@ -392,6 +420,36 @@ class Module(nn.Module):
         }
 
         torch.save(checkpoint, os.path.join(dout_path, filename))
+
+    def run_pred_streaming(self, dev, args=None, name='dev', iter=0):
+        '''
+        validation loop by streaming
+        '''
+        args = args or self.args
+        m_dev = collections.defaultdict(list)
+        p_dev = {}
+        self.eval()
+        total_loss = list()
+        dev_iter = iter
+        for batch in self.streaming_iterate(dev, args.batch):
+            feat = self.streaming_featurize(batch)
+            out = self.forward(feat)
+            preds = self.extract_preds(out, batch, feat)
+            p_dev.update(preds)
+            loss = self.compute_loss(out, batch, feat)
+            for k, v in loss.items():
+                ln = 'loss_' + k
+                m_dev[ln].append(v.item())
+                self.summary_writer.add_scalar("%s/%s" % (name, ln), v.item(), dev_iter)
+            sum_loss = sum(loss.values())
+            self.summary_writer.add_scalar("%s/loss" % (name), sum_loss, dev_iter)
+            total_loss.append(float(sum_loss.detach().cpu()))
+            dev_iter += len(batch)
+
+        m_dev = {k: sum(v) / len(v) for k, v in m_dev.items()}
+        total_loss = sum(total_loss) / len(total_loss)
+        return p_dev, dev_iter, total_loss, m_dev
+
     def run_pred(self, dev, args=None, name='dev', iter=0):
         '''
         validation loop
@@ -481,7 +539,7 @@ class Module(nn.Module):
             if response.status_code != 200:
                 return None
 
-            with io.BytesIO(pt_response.content) as buffer:
+            with io.BytesIO(response.content) as buffer:
                 im = torch.load(buffer, map_location='cpu')
 
             return im
