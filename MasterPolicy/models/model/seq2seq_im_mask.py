@@ -265,71 +265,20 @@ class Module(Base):
 
         assert(np.all(np.array(list(map(len, feat['lang_instr']))) == np.array(list(map(len, feat['objnav']))))) 
         # tensorization and padding
-        for k, v in feat.items():
-            if k in {'lang_goal'}:
-                # language embedding and padding
-                seqs = [torch.tensor(vv, device=device) for vv in v]
-                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
-                seq_lengths = np.array(list(map(len, v)))
-                embed_seq = self.emb_word(pad_seq)
-                packed_input = pack_padded_sequence(embed_seq, seq_lengths, batch_first=True, enforce_sorted=False)
-                feat[k] = packed_input
-            elif k in {'lang_instr'}:
-                # language embedding and padding
-                num_instr = np.array(list(map(len, v)))
-                seqs = [torch.tensor(vvv, device=device) for vv in v for vvv in vv]
-
-                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
-                
-                
-                embed_seq = self.emb_word(pad_seq)
-                fin_seq = []
-                in_idx = 0
-                for l in num_instr:
-                    fin_seq.append(embed_seq[in_idx:in_idx+l])
-                    in_idx += l
-                feat[k] = {'seq': fin_seq} 
-            
-            elif k in {'action_low_mask'}:
-                # mask padding
-                seqs = [torch.tensor(vv, device=device, dtype=torch.float) for vv in v]
-                feat[k] = seqs
-            elif k in {'action_low_mask_label'}:
-                # label
-                seqs = torch.tensor([vvv for vv in v for vvv in vv], device=device, dtype=torch.long)
-                feat[k] = seqs
-            elif k in {'subgoal_progress', 'subgoals_completed'}:
-                # auxillary padding
-                seqs = [torch.tensor(vv, device=device, dtype=torch.float) for vv in v]
-                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
-                feat[k] = pad_seq
-            elif k in {'action_high', 'action_high_order'}:
-                seqs = [torch.tensor(vv, device=device, dtype= torch.long) for vv in v]
-                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.vocab['action_high'].word2index('<<pad>>'))
-                feat[k] = pad_seq
-            elif k in {'objnav'}:
-                seqs = [torch.tensor(vv, device=device, dtype= torch.long) for vv in v]
-                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.vocab['objnav'].word2index('<<pad>>'))
-                embed_seq = self.emb_objnav(pad_seq)
-                feat[k] = embed_seq
-            else:
-                # default: tensorize and pad sequence
-                seqs = [torch.tensor(vv, device=device, dtype=torch.float if ('frames' in k or 'orientation' in k) else torch.long) for vv in v]
-                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
-                feat[k] = pad_seq
+        feat = self._tensorize_and_pad(feat, device)
 
         return feat
 
-    def streaming_featurize(self, batch_data):
+    def streaming_featurize(self, batch_data, load_mask=True, load_frames=True):
         '''
-        流式特征处理 - 确保设备一致性
+        tensorize and pad batch input-streaming version
         '''
         device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
         feat = collections.defaultdict(list)
 
         for data_item in batch_data:
             if data_item is None:
-                self._add_empty_features(feat, device)  # 传递设备信息
+                self._add_empty_features(feat, device)  # use the same device
                 continue
             ex = data_item['ex']
             im = data_item['im']
@@ -338,14 +287,11 @@ class Module(Base):
                 action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
                 low_to_high_idx = ex['num']['low_to_high_idx']
                 action_high = action_high_order[low_to_high_idx]
-
                 feat['action_high'].append(action_high)
                 feat['action_high_order'].append(action_high_order)
 
-                # GotoLocation 验证 - 修复索引问题
-                val_action_high = (
-                        action_high == self.vocab['action_high'].word2index('GotoLocation', train=False)
-                ).astype(np.int64)
+                # GotoLocation validation - fix the index problem
+                val_action_high = (action_high == self.vocab['action_high'].word2index('GotoLocation', train=False)).astype(np.int64)
 
                 v = 0
                 while v < (len(val_action_high) - 1):
@@ -355,18 +301,27 @@ class Module(Base):
                     v += 1
                 val_action_high[-1] = 1
 
-                # 序列化语言动作
+                #########
+                # inputs
+                #########
+
+                # serialize segments
                 self.serialize_lang_action(ex, action_high_order)
 
-                # 语言处理
+                # goal and instr language
                 lang_goal, lang_instr = ex['num']['lang_goal'], ex['num']['lang_instr']
+
+                # zero inputs if specified
                 lang_goal = self.zero_input(lang_goal) if self.args.zero_goal else lang_goal
                 lang_instr = self.zero_input(lang_instr) if self.args.zero_instr else lang_instr
 
+                # append goal + instr
                 feat['lang_goal'].append(lang_goal)
                 feat['lang_instr'].append(lang_instr)
 
-                # 动作处理
+                #########
+                # outputs
+                #########
                 alow = []
                 alow_manip = []
                 obj_high_indices = []
@@ -410,58 +365,51 @@ class Module(Base):
                 # 对象导航和掩码
                 obj_list = [self.vocab['objnav'].word2index('<<nav>>')]
                 high_idx = 0
-                indices = []
 
-                for a in ex['plan']['low_actions']:
-                    if a['api_action']['action'] in ['MoveAhead', 'LookUp', 'LookDown', 'RotateRight', 'RotateLeft']:
+                if load_mask:
+                    indices = []
+
+                    for a in ex['plan']['low_actions']:
+                        if a['api_action']['action'] in ['MoveAhead', 'LookUp', 'LookDown', 'RotateRight',
+                                                         'RotateLeft']:
+                            if a['high_idx'] == (high_idx + 1):
+                                obj_list.append(self.vocab['objnav'].word2index('<<nav>>', train=False))
+                                high_idx += 1
+                            continue
+                        if a['api_action']['action'] == 'PutObject':
+                            label = a['api_action']['receptacleObjectId'].split('|')
+                        else:
+                            label = a['api_action']['objectId'].split('|')
+                        indices.append(classes.index(label[4].split('_')[0] if len(label) >= 5 else label[0]))
+                        # obj_high_indices.append(high_idx)
+
                         if a['high_idx'] == (high_idx + 1):
-                            obj_list.append(self.vocab['objnav'].word2index('<<nav>>', train=False))
+                            # if obj_list[-1] != self.vocab['objnav'].word2index((label[4].split('_')[0] if len(label) >= 5 else label[0]).lower(), train=False):
+                            obj_list.append(self.vocab['objnav'].word2index(
+                                (label[4].split('_')[0] if len(label) >= 5 else label[0]).lower(), train=False))
                             high_idx += 1
-                        continue
 
-                    if a['api_action']['action'] == 'PutObject':
-                        label = a['api_action']['receptacleObjectId'].split('|')
-                    else:
-                        label = a['api_action']['objectId'].split('|')
+                    new_obj_list = [obj_list[o + 1] for o, obj in enumerate(obj_list) if
+                                    (obj == self.vocab['objnav'].word2index('<<nav>>'))]
 
-                    try:
-                        class_name = label[4].split('_')[0] if len(label) >= 5 else label[0]
-                        class_idx = classes.index(class_name)
-                        indices.append(class_idx)
-                    except (IndexError, ValueError):
-                        indices.append(0)  # 默认类别
+                    feat['objnav'].append(new_obj_list)
+                    feat['action_low_mask_label'].append(indices)
 
-                    if a['high_idx'] == (high_idx + 1):
-                        try:
-                            class_name = (label[4].split('_')[0] if len(label) >= 5 else label[0]).lower()
-                            obj_idx = self.vocab['objnav'].word2index(class_name, train=False)
-                            obj_list.append(obj_idx)
-                        except:
-                            obj_list.append(self.vocab['objnav'].word2index('<<nav>>', train=False))
-                        high_idx += 1
-
-                # 过滤导航标记
-                nav_token_idx = self.vocab['objnav'].word2index('<<nav>>')
-                new_obj_list = [obj_list[o + 1] for o, obj in enumerate(obj_list) if obj == nav_token_idx]
-
-                feat['objnav'].append(new_obj_list)
-                feat['action_low_mask_label'].append(indices)
 
                 # 图像特征处理 - make sure 在CPU上处理，后续会转移到正确设备
                 val_indices = val_action_high.nonzero()[0]
 
                 if len(im) >= 5 and len(val_indices) > 0:
                     try:
-                        # 确保索引在有效范围内
+                        # make sure the index in validation range
                         valid_indices = val_indices[val_indices < len(im[0])]
 
                         if len(valid_indices) > 0:
-                            # 保持在CPU上，后续统一转移设备
-                            feat['frames'].append(im[2][valid_indices].cpu())  # 主视角
-                            feat['frames_left'].append(im[0][valid_indices].cpu())  # 左侧
-                            feat['frames_up'].append(im[1][valid_indices].cpu())  # 上方
-                            feat['frames_down'].append(im[3][valid_indices].cpu())  # 下方
-                            feat['frames_right'].append(im[4][valid_indices].cpu())  # 右侧
+                            feat['frames'].append(im[2][valid_indices])  # main view
+                            feat['frames_left'].append(im[0][valid_indices])  # left view
+                            feat['frames_up'].append(im[1][valid_indices])  # up
+                            feat['frames_down'].append(im[3][valid_indices])  # down
+                            feat['frames_right'].append(im[4][valid_indices])  # right
                         else:
                             self._add_empty_image_features(feat, device)
 
@@ -476,12 +424,12 @@ class Module(Base):
                 self._add_empty_features(feat, device)
                 continue
 
-        # 张量化和填充 - 这会处理设备转移
-        feat = self._tensorize_and_pad(feat, device)
-
-        # 添加方向特征（在张量化之后）
         if self.orientation:
             feat = self._add_orientation_features(feat, device)
+
+        assert(np.all(np.array(list(map(len, feat['lang_instr']))) == np.array(list(map(len, feat['objnav'])))))
+        # tensorize and fill
+        feat = self._tensorize_and_pad(feat, device)
 
         return feat
 
@@ -507,113 +455,66 @@ class Module(Base):
             feat[key].append([] if key != 'subgoals_completed' else np.array([]))
 
     def _tensorize_and_pad(self, feat, device):
-        '''
-        张量化和填充逻辑 - 确保设备一致性
-        '''
         for k, v in feat.items():
-            try:
-                if k in {'lang_goal'}:
-                    # 处理语言目标
-                    seqs = [torch.tensor(vv, device=device) for vv in v if len(vv) > 0]
-                    if seqs:
-                        pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
-                        seq_lengths = np.array([len(vv) for vv in v if len(vv) > 0])
-                        embed_seq = self.emb_word(pad_seq)
-                        packed_input = pack_padded_sequence(embed_seq, seq_lengths, batch_first=True,
-                                                            enforce_sorted=False)
-                        feat[k] = packed_input
-                    else:
-                        # 创建空的packed sequence
-                        empty_seq = torch.zeros(0, 1, self.demb, device=device)
-                        feat[k] = pack_padded_sequence(empty_seq, [0], batch_first=True)
+            if k in {'lang_goal'}:
+                # language embedding and padding
+                seqs = [torch.tensor(vv, device=device) for vv in v]
+                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+                seq_lengths = np.array(list(map(len, v)))
+                embed_seq = self.emb_word(pad_seq)
+                packed_input = pack_padded_sequence(embed_seq, seq_lengths, batch_first=True, enforce_sorted=False)
+                feat[k] = packed_input
+            elif k in {'lang_instr'}:
+                # language embedding and padding
+                num_instr = np.array(list(map(len, v)))
+                seqs = [torch.tensor(vvv, device=device) for vv in v for vvv in vv]
 
-                elif k in {'lang_instr'}:
-                    # 处理指令语言 - 确保在正确设备上
-                    num_instr = np.array([len(vv) for vv in v])
-                    seqs = []
-                    for vv in v:
-                        if len(vv) > 0:
-                            seqs.extend([torch.tensor(vvv, device=device) for vvv in vv])
+                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
 
-                    if seqs:
-                        pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
-                        embed_seq = self.emb_word(pad_seq)
+                embed_seq = self.emb_word(pad_seq)
+                fin_seq = []
+                in_idx = 0
+                for l in num_instr:
+                    fin_seq.append(embed_seq[in_idx:in_idx + l])
+                    in_idx += l
+                feat[k] = {'seq': fin_seq}
 
-                        fin_seq = []
-                        in_idx = 0
-                        for l in num_instr:
-                            if l > 0:
-                                fin_seq.append(embed_seq[in_idx:in_idx + l])
-                                in_idx += l
-                            else:
-                                fin_seq.append(torch.tensor([], device=device))
-
-                        feat[k] = {'seq': fin_seq}
-                    else:
-                        feat[k] = {'seq': [torch.tensor([], device=device)]}
-
-                elif k in {'frames', 'frames_left', 'frames_up', 'frames_down', 'frames_right'}:
-                    # 处理图像特征 - 关键修复：确保所有张量都在同一设备上
-                    non_empty_tensors = [tensor for tensor in v if tensor.numel() > 0]
-
-                    if non_empty_tensors:
-                        # 转移所有张量到同一设备
-                        non_empty_tensors = [tensor.to(device) for tensor in non_empty_tensors]
-
-                        # 找到最大尺寸
-                        max_shape = max(tensor.shape for tensor in non_empty_tensors)
-
-                        # 填充所有张量到相同尺寸
-                        padded_tensors = []
-                        for tensor in v:
-                            if tensor.numel() == 0:
-                                # 创建空的占位张量（在同一设备上）
-                                empty_tensor = torch.zeros((0,) + max_shape[1:], device=device, dtype=torch.float)
-                                padded_tensors.append(empty_tensor)
-                            else:
-                                # 确保张量在正确设备上
-                                tensor = tensor.to(device)
-
-                                # 确保张量具有正确的维度
-                                if tensor.shape != max_shape:
-                                    # 调整尺寸
-                                    padded_tensor = torch.zeros(max_shape, device=device, dtype=torch.float)
-                                    min_shape = [min(s1, s2) for s1, s2 in zip(tensor.shape, max_shape)]
-                                    slices = tuple(slice(0, s) for s in min_shape)
-                                    padded_tensor[slices] = tensor[slices]
-                                    padded_tensors.append(padded_tensor)
-                                else:
-                                    padded_tensors.append(tensor)
-
-                        # 拼接批次张量
-                        feat[k] = torch.cat(padded_tensors, dim=0)
-                    else:
-                        feat[k] = torch.tensor([], device=device, dtype=torch.float)
-
-                else:
-                    # 默认处理 - 确保在正确设备上
-                    seqs = [torch.tensor(vv, device=device, dtype=torch.long) for vv in v if len(vv) > 0]
-                    if seqs:
-                        pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
-                        feat[k] = pad_seq
-                    else:
-                        feat[k] = torch.tensor([], device=device, dtype=torch.long)
-
-            except Exception as e:
-                print(f"Error processing feature {k}: {e}")
-                # 设置适当的空值（在正确设备上）
-                if 'frame' in k:
-                    feat[k] = torch.tensor([], device=device, dtype=torch.float)
-                else:
-                    feat[k] = torch.tensor([], device=device, dtype=torch.long)
+            elif k in {'action_low_mask'}:
+                # mask padding
+                seqs = [torch.tensor(vv, device=device, dtype=torch.float) for vv in v]
+                feat[k] = seqs
+            elif k in {'action_low_mask_label'}:
+                # label
+                seqs = torch.tensor([vvv for vv in v for vvv in vv], device=device, dtype=torch.long)
+                feat[k] = seqs
+            elif k in {'subgoal_progress', 'subgoals_completed'}:
+                # auxillary padding
+                seqs = [torch.tensor(vv, device=device, dtype=torch.float) for vv in v]
+                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+                feat[k] = pad_seq
+            elif k in {'action_high', 'action_high_order'}:
+                seqs = [torch.tensor(vv, device=device, dtype=torch.long) for vv in v]
+                pad_seq = pad_sequence(seqs, batch_first=True,
+                                       padding_value=self.vocab['action_high'].word2index('<<pad>>'))
+                feat[k] = pad_seq
+            elif k in {'objnav'}:
+                seqs = [torch.tensor(vv, device=device, dtype=torch.long) for vv in v]
+                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.vocab['objnav'].word2index('<<pad>>'))
+                embed_seq = self.emb_objnav(pad_seq)
+                feat[k] = embed_seq
+            else:
+                # default: tensorize and pad sequence
+                seqs = [torch.tensor(vv, device=device,
+                                     dtype=torch.float if ('frames' in k or 'orientation' in k) else torch.long) for vv
+                        in v]
+                pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+                feat[k] = pad_seq
 
         return feat
 
 
     def _add_orientation_features(self, feat, device):
-        '''
-        添加方向特征
-        '''
+
         import math
 
         def get_orientation(d, device):
@@ -647,12 +548,9 @@ class Module(Base):
         }
 
         for view_key, direction in orientation_mapping.items():
-            if view_key in feat and feat[view_key].numel() > 0:
-                view_tensor = feat[view_key]
-                orientation_tensor = get_orientation(direction, device)
-                batch_size, channels, height, width = view_tensor.shape
-                orientation_expanded = orientation_tensor.unsqueeze(0).repeat(batch_size, 1, 1, 1)
-                feat[view_key] = torch.cat([view_tensor, orientation_expanded], dim=1)
+            view_tensor = feat[view_key][-1]
+            orientation_tensor = get_orientation(direction, device).repeat(len(view_tensor))
+            feat[view_key][-1] = torch.cat([view_tensor, orientation_tensor, 1, 1, 1], dim=1)
 
         return feat
 
