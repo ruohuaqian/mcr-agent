@@ -355,26 +355,11 @@ class Module(nn.Module):
         流式批处理生成器
         '''
         error_no = 0
-        count = 0
-        current_batch = []
-        for i in trange(0, count, batch_size, desc='batch'):
-            feat = self.streaming_featurize(data_stream, batch_size)
-            current_batch.append(data)
-            count += 1
-
-        for data_item in data_stream:
-            task
-            if data_item is None:
-                continue
-
-            current_batch.append(data_item)
-
-            if len(current_batch) >= batch_size:
-                yield current_batch
-                current_batch = []
-
-        if current_batch:
-            yield current_batch, feat
+        try:
+            yield from self.streaming_featurize(data_stream, batch_size)
+        except Exception as e:
+            error_no += 1
+            print(f"no. {error_no} of wrong trajs, {e}")
 
 
     def run_pred_streaming(self, dev, args=None, name='dev', iter=0):
@@ -387,8 +372,7 @@ class Module(nn.Module):
         self.eval()
         total_loss = list()
         dev_iter = iter
-        for batch in self.streaming_iterate(dev, args.batch):
-            feat = self.streaming_featurize(batch)
+        for batch, feat in self.streaming_iterate(dev, args.batch):
             out = self.forward(feat)
             preds = self.extract_preds(out, batch, feat)
             p_dev.update(preds)

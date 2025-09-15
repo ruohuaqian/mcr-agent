@@ -267,32 +267,46 @@ class Module(Base):
         # tensorization and padding
         feat = self._tensorize_and_pad(feat, device)
 
-        return feat
+        yield feat
 
     def streaming_featurize(self, data_stream, batch_size, load_mask=True, load_frames=True):
         '''
-        tensorize and pad batch input-streaming version
+        Tensorize and pad batch input - streaming version
         '''
         device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
+
         batch_feat = collections.defaultdict(list)
+        batch = []
 
         for data_item in data_stream:
-            if data_item is not None:
-                feat_one = self._fill_feature_one(data_item, device, load_mask, load_frames, )
+            # 跳过空数据
+            if data_item is None:
+                continue
+            try:
+                feat_one = self._fill_feature_one(data_item, device, load_mask, load_frames)
                 if feat_one is None:
                     self._keep_empty_in_batch(batch_feat, device)
                 else:
                     for feature_name, value in feat_one.items():
                         batch_feat[feature_name].append(value)
 
+                batch.append(data_item)
 
+                if len(batch) == batch_size:
+                    # Tensorize and pad the full batch
+                    final_batch_feat = self._tensorize_and_pad(batch_feat, device)
+                    yield batch, final_batch_feat
 
-        assert(np.all(np.array(list(map(len, batch_feat['lang_instr']))) == np.array(list(map(len, batch_feat['objnav'])))))
-        # tensorize and fill
-        batch_feat = self._tensorize_and_pad(batch_feat, device)
+                    batch_feat = collections.defaultdict(list)
+                    batch = []
 
-        yield batch_feat
+            except Exception as e:
+                print(f"Skipping a problematic data item due to error: {e}")
+                raise
 
+        if batch:
+            final_batch_feat = self._tensorize_and_pad(batch_feat, device)
+            yield batch, final_batch_feat
 
     def _fill_feature_one(self, data_item, device, load_mask=True, load_frames=True):
         feat_one = dict()
@@ -413,7 +427,6 @@ class Module(Base):
                 feat_one['objnav'] = new_obj_list
                 feat_one['action_low_mask_label'] = indices
 
-            # 图像特征处理 - make sure 在CPU上处理，后续会转移到正确设备
             if load_frames and not self.test_mode:
                 val_indices = val_action_high.nonzero()[0]
 
@@ -451,7 +464,7 @@ class Module(Base):
         return feat_one
 
     def _keep_empty_in_batch(self, feat, device):
-        '''添加所有空特征'''
+        '''generate a empty feature to batch feature'''
         # 图像特征
         empty_tensor = torch.tensor([], device=device, dtype=torch.float)
         for view in ['frames', 'frames_left', 'frames_up', 'frames_down', 'frames_right']:
