@@ -174,51 +174,56 @@ class Module(nn.Module):
 
     def run_train_stream(self, splits, args=None, optimizer=None):
         '''
-        流式训练方法
+        training loop - streaming version
         '''
         self.setup_hf_auth()
         args = args or self.args
 
-        # 创建流式数据集
-        train_stream = self.create_streaming_dataset(
-            splits['train'],
-            augment=True
-        )
-        valid_seen_stream = self.create_streaming_dataset(splits['valid_seen'])
-        valid_unseen_stream = self.create_streaming_dataset(splits['valid_unseen'])
-        # 调试模式处理
-        if args.fast_epoch:
-            # 对于流式数据，我们需要在迭代时limit num
-            def limited_stream(stream, limit):
-                count = 0
-                for item in stream:
-                    if count >= limit:
-                        break
-                    yield item
-                    count += 1
+        train_list = splits['train']
+        # valid_seen = splits['valid_seen']
+        # valid_unseen = splits['valid_unseen']
 
-            train_stream = limited_stream(train_stream, 16)
-            valid_seen_stream = limited_stream(valid_seen_stream, 1)
-            valid_unseen_stream = limited_stream(valid_unseen_stream, 1)
-        # 初始化优化器
-        optimizer = optimizer or torch.optim.Adam(self.parameters(), lr=args.lr)
+        train = [(s, False) for s in train_list]
+        train = train + [(s, 1) for s in train_list] + [(s, 2) for s in train_list]
+        train = train + [(s, 3) for s in train_list] + [(s, 4) for s in train_list] + [(s, 5) for s in train_list] + [
+            (s, 6) for s in train_list]
+
+        # debugging: chose a small fraction of the dataset
+        if self.args.dataset_fraction > 0:
+            small_train_size = int(self.args.dataset_fraction * 0.7)
+            train = train[:small_train_size]
+
+        # debugging: use to check if training loop works without waiting for full epoch
+        if self.args.fast_epoch:
+            train = train[-16:]
+
+        # initialize summary writer for tensorboardX
         self.summary_writer = SummaryWriter(log_dir=args.dout)
-        # 保存配置
-        with open(os.path.join(args.dout, 'config.json'), 'wt') as f:
+
+        # dump config
+        fconfig = os.path.join(args.dout, 'config.json')
+        with open(fconfig, 'wt') as f:
             json.dump(vars(args), f, indent=2)
 
-        print("Saving to: %s" % args.dout)
-        train_iter = 0
+        # optimizer
+        optimizer = optimizer or torch.optim.Adam(self.parameters(), lr=args.lr)
+
+        # display dout
+        print("Saving to: %s" % self.args.dout)
+        best_loss = {'train': 1e10, 'valid_seen': 1e10, 'valid_unseen': 1e10}
+        train_iter, valid_seen_iter, valid_unseen_iter = 0, 0, 0
 
         # 训练循环
         for epoch in range(args.epoch):
             m_train = collections.defaultdict(list)
             self.train()
-            self.adjust_lr(optimizer, args.lr, epoch, args.decay_epoch)
+            self.adjust_lr(optimizer, args.lr, epoch, decay_epoch=args.decay_epoch)
             total_train_loss = []
-            batch_count = 0
-            for batch in self.streaming_iterate(train_stream, args.batch):
-                feat = self.streaming_featurize(batch)
+            random.shuffle(train)
+            c_st = 0
+            epoch_train_stream = self.create_streaming_dataset(train)
+            for batch, feat in self.streaming_iterate(epoch_train_stream, args.batch):
+                c_st += 1
 
                 if len(feat['sub_objs']) == 0:
                     continue
@@ -240,32 +245,59 @@ class Module(nn.Module):
 
                 self.summary_writer.add_scalar('train/loss', sum_loss, train_iter)
                 total_train_loss.append(float(sum_loss.detach().cpu()))
-                train_iter += len(batch)
-                batch_count += 1
+                train_iter += args.batch
 
-            # 保存epoch检查点
-            self.save_checkpoint(epoch, 0, optimizer, args.dout)
+                # save checkpoint
+                stats = {'epoch': epoch, c_st: c_st}
 
-    def create_streaming_dataset(self, task_list, augment=False):
+                # save the latest checkpoint
+                if args.save_every_epoch:
+                    fsave = os.path.join(args.dout, 'net_epoch_%d.pth' % epoch)
+                else:
+                    fsave = os.path.join(args.dout, 'latest.pth')
+                torch.save({
+                    'metric': stats,  # stats,
+                    'model': self.state_dict(),
+                    'optim': optimizer.state_dict(),
+                    'args': self.args,
+                    'vocab': self.vocab,
+                }, fsave)
+
+                # write stats
+                for split in stats.keys():
+                    if isinstance(stats[split], dict):
+                        for k, v in stats[split].items():
+                            self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
+                pprint.pprint(stats)
+
+    def create_streaming_dataset(self, task_list):
         '''
-        创建流式数据集
+        创建流式数据集 - 导航版本
         '''
-        # 实现流式数据加载逻辑
-        for task in task_list:
-            if augment:
-                for swapColor in range(7):
-                    yield self.load_streaming_task(task, swapColor)
+
+        for task_info in task_list:
+
+            if isinstance(task_info[0], dict):
+                task_path = task_info[0]['task']
+                repeat_idx = task_info[0].get('repeat_idx', 0)
+                swapColor = task_info[1]
             else:
-                yield self.load_streaming_task(task, False)
+                task_path = task_info
+                repeat_idx = 0
+                swapColor = false
 
-    def load_streaming_task(self, task, swapColor):
+            # 数据增强：7种swapColor变体
+            task_data = self.load_streaming_task(task_path, repeat_idx, swapColor)
+            if task_data is not None:
+                yield task_data
+
+    def load_streaming_task(self, task_path, repeat_idx, swapColor):
         '''
         流式加载单个任务数据
         '''
-        task_path = task['task']
         try:
             # 加载JSON数据
-            json_filename = f"{task_path}/pp/ann_{task['repeat_idx']}.json"  # 假设repeat_idx=0
+            json_filename = f"{task_path}/pp/ann_{repeat_idx}.json"
             json_url = hf_hub_url(
                 repo_id=self.args.huggingface_id,
                 filename=json_filename,
@@ -277,10 +309,13 @@ class Module(nn.Module):
                 timeout=120,
                 stream=False
             )
+            if json_response.status_code != 200:
+                return None
+
             ex = json.loads(json_response.content.decode('utf-8'))
 
             # 加载图像特征
-            if not swapColor:
+            if swapColor == 0:
                 pt_filename = f"train/{task_path}/{self.feat_pt}"
             elif swapColor in [1, 2]:
                 pt_filename = f"train/{task_path}/feat_conv_colorSwap{swapColor}_panoramic.pt"
@@ -298,14 +333,17 @@ class Module(nn.Module):
                 timeout=300,
                 stream=True
             )
+            if pt_response.status_code != 200:
+                return None
+
             with io.BytesIO(pt_response.content) as buffer:
-                im = torch.load(buffer, map_location='cpu')
+                im = torch.load(buffer)
 
             return {
                 'ex': ex,
                 'im': im,
                 'task_path': task_path,
-                'repeat_idx': task['repeat_idx'],
+                'repeat_idx': repeat_idx,
                 'swapColor': swapColor
             }
 
@@ -313,42 +351,45 @@ class Module(nn.Module):
             print(f"Error loading task {task_path}: {e}")
             return None
 
-    def save_checkpoint(self, epoch, batch_count, optimizer, dout_path):
-        '''
-        保存检查点
-        '''
-        if self.args.save_every_epoch:
-            filename = f'net_epoch_{epoch}.pth'
-        else:
-            filename = f'latest.pth'
-
-        checkpoint = {
-            'metric': {'epoch': epoch, 'batch_count': batch_count},
-            'model': self.state_dict(),
-            'optim': optimizer.state_dict(),
-            'args': self.args,
-            'vocab': self.vocab,
-        }
-
-        torch.save(checkpoint, os.path.join(dout_path, filename))
-
     def streaming_iterate(self, data_stream, batch_size):
         '''
         流式批处理生成器
         '''
-        current_batch = []
-        for data_item in data_stream:
-            if data_item is None:
-                continue
+        error_no = 0
+        try:
+            yield from self.streaming_featurize(data_stream, batch_size)
+        except Exception as e:
+            error_no += 1
+            print(f"no. {error_no} of wrong trajs, {e}")
+            raise e
 
-            current_batch.append(data_item)
+    def run_pred_streaming(self, dev, args=None, name='dev', iter=0):
+        '''
+        validation loop by streaming
+        '''
+        args = args or self.args
+        m_dev = collections.defaultdict(list)
+        p_dev = {}
+        self.eval()
+        total_loss = list()
+        dev_iter = iter
+        for batch, feat in self.streaming_iterate(dev, args.batch):
+            out = self.forward(feat)
+            preds = self.extract_preds(out, batch, feat)
+            p_dev.update(preds)
+            loss = self.compute_loss(out, batch, feat)
+            for k, v in loss.items():
+                ln = 'loss_' + k
+                m_dev[ln].append(v.item())
+                self.summary_writer.add_scalar("%s/%s" % (name, ln), v.item(), dev_iter)
+            sum_loss = sum(loss.values())
+            self.summary_writer.add_scalar("%s/loss" % (name), sum_loss, dev_iter)
+            total_loss.append(float(sum_loss.detach().cpu()))
+            dev_iter += len(batch)
 
-            if len(current_batch) >= batch_size:
-                yield current_batch
-                current_batch = []
-
-        if current_batch:
-            yield current_batch
+        m_dev = {k: sum(v) / len(v) for k, v in m_dev.items()}
+        total_loss = sum(total_loss) / len(total_loss)
+        return p_dev, dev_iter, total_loss, m_dev
 
     def run_pred(self, dev, args=None, name='dev', iter=0):
         '''
@@ -379,6 +420,9 @@ class Module(nn.Module):
         return p_dev, dev_iter, total_loss, m_dev
 
     def featurize(self, batch):
+        raise NotImplementedError()
+
+    def streaming_featurize(self, data_stream, batch_size):
         raise NotImplementedError()
 
     def forward(self, feat, max_decode=100):

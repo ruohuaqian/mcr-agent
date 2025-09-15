@@ -162,7 +162,7 @@ class Module(nn.Module):
         '''
         training loop - streaming version
         '''
-
+        self.setup_hf_auth()
         # args
         args = args or self.args
 
@@ -418,8 +418,10 @@ class Module(nn.Module):
 
     def featurize(self, batch):
         raise NotImplementedError()
+
     def streaming_featurize(self, data_stream, batch_size):
         raise NotImplementedError()
+
     def forward(self, feat, max_decode=100):
         raise NotImplementedError()
 
@@ -462,28 +464,6 @@ class Module(nn.Module):
             data = json.load(f)
         return data
 
-    def load_task_json_from_hub(self, task):
-        '''
-        Downloads and loads a single task JSON from the Hugging Face Hub.
-        '''
-        try:
-            filename = f"{task['task']}/{self.args.pp_folder}/ann_{task['repeat_idx']}.json"
-            json_url = hf_hub_url(
-                repo_id=self.args.huggingface_id,
-                filename=filename,
-                repo_type="dataset"
-            )
-            response = requests.get(json_url, timeout=30)
-            if response.status_code != 200:
-                return None
-
-            with io.BytesIO(response.content) as buffer:
-                im = torch.load(buffer, map_location='cpu')
-
-            return im
-        except Exception as e:
-            print(f"Error loading task from Hub for task='{task.get('task')}': {e}")
-            raise e
     def get_task_root(self, ex):
         '''
         returns the folder path of a trajectory

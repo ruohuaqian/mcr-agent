@@ -279,7 +279,7 @@ class Module(Base):
         batch = []
 
         for data_item in data_stream:
-            # 跳过空数据
+            # jump to empty data
             if data_item is None:
                 continue
             try:
@@ -630,72 +630,6 @@ class Module(Base):
                            state_0_goal=state_0_goal, state_0_instr=state_0_instr)
         feat.update(res)
         return feat
-
-    def _ensure_features_on_device(self, feat, device):
-        """确保所有特征都在正确的设备上"""
-        for key, value in feat.items():
-            if torch.is_tensor(value):
-                feat[key] = value.to(device)
-            elif isinstance(value, dict):
-                # 递归处理字典中的张量
-                for sub_key, sub_value in value.items():
-                    if torch.is_tensor(sub_value):
-                        value[sub_key] = sub_value.to(device)
-            elif isinstance(value, (list, tuple)):
-                # 处理列表或元组中的张量
-                new_value = []
-                for item in value:
-                    if torch.is_tensor(item):
-                        new_value.append(item.to(device))
-                    else:
-                        new_value.append(item)
-                feat[key] = type(value)(new_value)
-
-        return feat
-
-    def _process_language_goal(self, feat, device):
-        """处理目标语言特征"""
-        if 'lang_goal' in feat:
-            if hasattr(feat['lang_goal'], 'pi'):  # 如果是packed sequence
-                enc_lang_goal = feat['lang_goal'].pi
-                # 获取初始隐藏状态
-                _, state_0_goal = self.enc_lang_goal(enc_lang_goal)
-                return enc_lang_goal, state_0_goal
-            else:
-                # 处理普通张量
-                lang_goal_tensor = feat['lang_goal'].to(device) if torch.is_tensor(feat['lang_goal']) else feat[
-                    'lang_goal']
-                enc_lang_goal, state_0_goal = self.enc_lang_goal(lang_goal_tensor)
-                return enc_lang_goal, state_0_goal
-        else:
-            # 创建空的占位符
-            batch_size = feat['frames'].size(0) if 'frames' in feat else 1
-            empty_goal = torch.zeros(batch_size, 1, self.demb, device=device)
-            return empty_goal, None
-
-    def _process_language_instr(self, feat, device):
-        """处理指令语言特征"""
-        if 'lang_instr' in feat:
-            lang_instr_data = feat['lang_instr']
-
-            if isinstance(lang_instr_data, dict) and 'seq' in lang_instr_data:
-                # 处理字典格式的指令
-                instr_seqs = lang_instr_data['seq']
-                if instr_seqs:
-                    # 处理第一个指令序列
-                    first_seq = instr_seqs[0].to(device) if torch.is_tensor(instr_seqs[0]) else instr_seqs[0]
-                    enc_lang_instr, state_0_instr = self.enc_lang_instr(first_seq)
-                    return enc_lang_instr, state_0_instr
-
-            # 回退到普通张量处理
-            lang_instr_tensor = lang_instr_data.to(device) if torch.is_tensor(lang_instr_data) else lang_instr_data
-            enc_lang_instr, state_0_instr = self.enc_lang_instr(lang_instr_tensor)
-            return enc_lang_instr, state_0_instr
-        else:
-            # 创建空的占位符
-            batch_size = feat['frames'].size(0) if 'frames' in feat else 1
-            empty_instr = torch.zeros(batch_size, 1, self.demb, device=device)
-            return empty_instr, None
 
     def encode_lang(self, feat):
         '''
