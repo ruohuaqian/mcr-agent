@@ -240,6 +240,7 @@ class Module(nn.Module):
 
                 except Exception as e:
                     print(f"Error in batch processing: {e}")
+                    raise e
                     continue
 
             # 保存检查点

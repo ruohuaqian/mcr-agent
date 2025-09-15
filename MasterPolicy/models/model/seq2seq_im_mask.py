@@ -454,6 +454,7 @@ class Module(Base):
                     feat_one = self._add_orientation_features(feat_one, device)
         except Exception as e:
             print(f"Error processing task: {e}")
+            raise e
             return None
         return feat_one
 
@@ -610,58 +611,25 @@ class Module(Base):
         return mask
 
     def forward(self, feat, max_decode=300):
-        # 确保所有特征都在正确的设备上
-        device = next(self.parameters()).device  # 获取模型所在的设备
 
-        # 转移所有特征到模型所在的设备
-        feat = self._ensure_features_on_device(feat, device)
+        frames = self.vis_dropout(feat['frames'])
+        if self.panoramic:
+            frames_left = self.vis_dropout(feat['frames_left'])
+            frames_up = self.vis_dropout(feat['frames_up'])
+            frames_down = self.vis_dropout(feat['frames_down'])
+            frames_right = self.vis_dropout(feat['frames_right'])
+            res = self.dec(feat['objnav'], feat['lang_instr']['seq'], frames, frames_left, frames_up, frames_down,
+                           frames_right, max_decode=max_decode,
+                           gold=feat['action_low'])  # , state_0_instr=state_0_instr)
+        else:
+            enc_lang_goal = feat['lang_goal'].pi
+            enc_lang_instr = feat['enc_lang_instr']
 
-        try:
-            # 处理视觉特征
-            frames = self.vis_dropout(feat['frames'])
 
-            if self.panoramic:
-                frames_left = self.vis_dropout(feat['frames_left'])
-                frames_up = self.vis_dropout(feat['frames_up'])
-                frames_down = self.vis_dropout(feat['frames_down'])
-                frames_right = self.vis_dropout(feat['frames_right'])
-
-                # 使用正确的语言特征
-                if 'lang_instr' in feat and 'objnav' in feat:
-                    res = self.dec(
-                        feat['objnav'],
-                        feat['lang_instr']['seq'],
-                        frames, frames_left, frames_up, frames_down, frames_right,
-                        max_decode=max_decode,
-                        gold=feat.get('action_low', None)
-                    )
-                else:
-                    raise ValueError("Missing required language features for panoramic mode")
-
-            else:
-                # 为非全景模式准备语言特征
-                enc_lang_goal, state_0_goal = self._process_language_goal(feat, device)
-                enc_lang_instr, state_0_instr = self._process_language_instr(feat, device)
-
-                res = self.dec(
-                    enc_lang_goal,
-                    enc_lang_instr,
-                    frames,
-                    max_decode=max_decode,
-                    gold=feat.get('action_low', None),
-                    state_0_goal=state_0_goal,
-                    state_0_instr=state_0_instr
-                )
-
-            feat.update(res)
-            return feat
-
-        except Exception as e:
-            print(f"Error in forward pass: {e}")
-            import traceback
-            traceback.print_exc()
-            # 返回空的特征字典以避免后续错误
-            return feat
+            res = self.dec(enc_lang_goal, enc_lang_instr, frames, max_decode=max_decode, gold=feat['action_low'],
+                           state_0_goal=state_0_goal, state_0_instr=state_0_instr)
+        feat.update(res)
+        return feat
 
     def _ensure_features_on_device(self, feat, device):
         """确保所有特征都在正确的设备上"""
