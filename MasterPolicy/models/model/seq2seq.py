@@ -271,24 +271,20 @@ class Module(nn.Module):
         '''
 
         for task_info in task_list:
-            if isinstance(task_info, dict):
-                task_path = task_info['task']
-                repeat_idx = task_info.get('repeat_idx', 0)
+
+            if isinstance(task_info[0], dict):
+                task_path = task_info[0]['task']
+                repeat_idx = task_info[0].get('repeat_idx', 0)
+                swapColor = task_info[1]
             else:
                 task_path = task_info
                 repeat_idx = 0
+                swapColor = false
 
-            if task_info['swap']:
-                # 数据增强：7种swapColor变体
-                swapColor = task_info['swapColor']
-                task_data = self.load_streaming_task(task_path, repeat_idx, swapColor)
-                if task_data is not None:
-                    yield task_data
-            else:
-                # 无数据增强
-                task_data = self.load_streaming_task(task_path, repeat_idx, False)
-                if task_data is not None:
-                    yield task_data
+            # 数据增强：7种swapColor变体
+            task_data = self.load_streaming_task(task_path, repeat_idx, swapColor)
+            if task_data is not None:
+                yield task_data
 
     def load_streaming_task(self, task_path, repeat_idx, swapColor):
         '''

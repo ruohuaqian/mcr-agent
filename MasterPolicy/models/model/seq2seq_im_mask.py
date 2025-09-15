@@ -302,7 +302,7 @@ class Module(Base):
 
             except Exception as e:
                 print(f"Skipping a problematic data item due to error: {e}")
-                raise
+                raise e
 
         if batch:
             final_batch_feat = self._tensorize_and_pad(batch_feat, device)
