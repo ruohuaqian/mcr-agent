@@ -577,8 +577,8 @@ class Module(Base):
 
         for view_key, direction in orientation_mapping.items():
             view_tensor = feat_one[view_key]
-            orientation_tensor = get_orientation(direction, device).repeat(len(view_tensor))
-            feat_one[view_key] = torch.cat([view_tensor, orientation_tensor, 1, 1, 1], dim=1)
+            orientation_tensor = get_orientation(direction, device).repeat(len(view_tensor),1,1,1)
+            feat_one[view_key] = torch.cat([view_tensor, orientation_tensor], dim=1)
 
         return feat_one
 
