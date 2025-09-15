@@ -443,6 +443,28 @@ class Module(nn.Module):
         '''
         return "%s_%s" % (ex['task_id'], str(ex['ann']['repeat_idx']))
 
+    def make_debug_streaming(self, preds, data):
+        '''
+        readable output generator for debugging
+        '''
+
+        data_stream = self.create_streaming_dataset(data)
+        debug = {}
+        # 'ex': ex,
+        # 'im': im,
+        # 'task_path': task_path,
+        # 'repeat_idx': repeat_idx,
+        # 'swapColor': swapColor
+        for data_item in data_stream:
+            ex = data_item['ex']
+            i = get_task_and_ann_id(ex)
+
+            debug[i] = {
+                'lang_goal': ex['turk_annotations']['anns'][ex['ann']['repeat_idx']]['task_desc'],
+                'action_low': [a['discrete_action']['action'] for a in ex['plan']['low_actions']],
+                'p_action_low': preds[i]['action_low'].split(),
+            }
+        return debug
     def make_debug(self, preds, data):
         '''
         readable output generator for debugging

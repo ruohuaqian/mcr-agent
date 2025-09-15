@@ -138,71 +138,57 @@ class Module(nn.Module):
                         self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
             pprint.pprint(stats)
 
+    def setup_hf_auth(self):
+        # use environ path
+        if os.environ.get('HF_TOKEN'):
+            login(token=os.environ.get('HF_TOKEN'))
+
     def run_train_stream(self, splits, args=None, optimizer=None):
         '''
         training loop with streaming data loading
         '''
+        self.setup_hf_auth()
         # args
         args = args or self.args
 
         # splits
         train_list = splits['train']
-        valid_seen = splits['valid_seen']
-        valid_unseen = splits['valid_unseen']
+        # valid_seen = splits['valid_seen']
+        # valid_unseen = splits['valid_unseen']
 
-        # 创建流式数据集
-        train_stream = ALFREDStreamingDataset(
-            repo_id=self.args.huggingface_id,
-            task_list=train_list,
-            feat_pt=self.feat_pt,
-            args=self.args
-        )
+        train = [(s, False) for s in train_list]
+        train = train + [(s, 1) for s in train_list] + [(s, 2) for s in train_list]
+        train = train + [(s, 3) for s in train_list] + [(s, 4) for s in train_list] + [(s, 5) for s in train_list] + [
+            (s, 6) for s in train_list]
+        # valid_seen = [(s, False) for s in valid_seen]
+        # valid_unseen = [(s, False) for s in valid_unseen]
 
-        valid_seen_stream = ALFREDStreamingDataset(
-            repo_id=self.args.huggingface_id,
-            task_list=valid_seen,
-            feat_pt=self.feat_pt,
-            args=self.args
-        )
-
-        valid_unseen_stream = ALFREDStreamingDataset(
-            repo_id=self.args.huggingface_id,
-            task_list=valid_unseen,
-            feat_pt=self.feat_pt,
-            args=self.args
-        )
-
-        # 调试模式：使用小数据集
-        def limited_stream(stream, limit):
-            count = 0
-            for item in stream:
-                if count >= limit:
-                    break
-                yield item
-                count += 1
+        # debugging: chose a small fraction of the dataset
         if self.args.dataset_fraction > 0:
-            # 对于流式数据，我们需要在迭代时进行限制
-            train_size = int(len(train_list) * self.args.dataset_fraction * 0.7)
-            valid_size = int(len(valid_seen) * (self.args.dataset_fraction * 0.3) / 2)
+            small_train_size = int(self.args.dataset_fraction * 0.7)
+            # small_valid_size = int((self.args.dataset_fraction * 0.3) / 2)
+            train = train[:small_train_size]
+            # valid_seen = valid_seen[:small_valid_size]
+            # valid_unseen = valid_unseen[:small_valid_size]
 
-            train_stream = limited_stream(train_stream, train_size)
-            valid_seen_stream = limited_stream(valid_seen_stream, valid_size)
-            valid_unseen_stream = limited_stream(valid_unseen_stream, valid_size)
+        # debugging: use to check if training loop works without waiting for full epoch
         if self.args.fast_epoch:
-            train_stream = limited_stream(train_stream, 16)
-            valid_seen_stream = limited_stream(valid_seen_stream, 1)
-            valid_unseen_stream = limited_stream(valid_unseen_stream, 1)
-        # 初始化 tensorboard
+            train = train[-16:]
+            # valid_seen = valid_seen[:1]
+            # valid_unseen = valid_unseen[:1]
+
+        # initialize summary writer for tensorboardX
         self.summary_writer = SummaryWriter(log_dir=args.dout)
 
-        # 保存配置
+        # dump config
         fconfig = os.path.join(args.dout, 'config.json')
         with open(fconfig, 'wt') as f:
             json.dump(vars(args), f, indent=2)
 
-        # 优化器
+        # optimizer
         optimizer = optimizer or torch.optim.Adam(self.parameters(), lr=args.lr)
 
+        # display dout
         print("Saving to: %s" % self.args.dout)
         best_loss = {'train': 1e10, 'valid_seen': 1e10, 'valid_unseen': 1e10}
         train_iter, valid_seen_iter, valid_unseen_iter = 0, 0, 0
@@ -213,49 +199,167 @@ class Module(nn.Module):
             self.adjust_lr(optimizer, args.lr, epoch, decay_epoch=args.decay_epoch)
             total_train_loss = list()
 
+            random.shuffle(train)
+            c_st = 0
+            epoch_train_stream = self.create_streaming_dataset(train)
             # 使用流式迭代器
-            for batch_idx, batch in enumerate(self.streaming_iterate(train_stream, args.batch)):
-                feat = self.streaming_featurize(batch)
+            for batch, feat in self.streaming_iterate(epoch_train_stream, args.batch):
+                c_st += 1
+                try:
+                    out = self.forward(feat)
+                    loss = self.compute_loss(out, batch, feat)
 
-                out = self.forward(feat)
-                loss = self.compute_loss(out, batch, feat)
+                    # 记录损失
+                    for k, v in loss.items():
+                        ln = 'loss_' + k
+                        m_train[ln].append(v.item())
+                        self.summary_writer.add_scalar('train/' + ln, v.item(), train_iter)
 
-                for k, v in loss.items():
-                    ln = 'loss_' + k
-                    m_train[ln].append(v.item())
-                    self.summary_writer.add_scalar('train/' + ln, v.item(), train_iter)
+                    # 反向传播
+                    optimizer.zero_grad()
+                    sum_loss = sum(loss.values())
+                    sum_loss.backward()
+                    optimizer.step()
 
-                # 优化器反向传播
-                optimizer.zero_grad()
-                sum_loss = sum(loss.values())
-                sum_loss.backward()
-                optimizer.step()
+                    self.summary_writer.add_scalar('train/loss', sum_loss, train_iter)
+                    total_train_loss.append(float(sum_loss.detach().cpu()))
+                    train_iter += args.batch
 
-                self.summary_writer.add_scalar('train/loss', sum_loss, train_iter)
-                sum_loss = sum_loss.detach().cpu()
-                total_train_loss.append(float(sum_loss))
-                train_iter += len(batch)
+                except Exception as e:
+                    print(f"Error in batch processing: {e}")
+                    raise e
+                    continue
+            #each epoch validation the loss
+            self.validate(valid_seen_stream, valid_unseen_stream, train_iter)
+                # 保存检查点
+            stats = {'epoch': epoch, c_st: c_st}
 
-                # 每 256 个batch进行验证
-                if batch_idx % 256 == 0:
-                    self.validate(valid_seen_stream, valid_unseen_stream, train_iter)
-
-            # 保存检查点
-            stats = {'epoch': epoch}
+            # save the latest checkpoint
             if args.save_every_epoch:
                 fsave = os.path.join(args.dout, 'net_epoch_%d.pth' % epoch)
             else:
                 fsave = os.path.join(args.dout, 'latest.pth')
-
             torch.save({
-                'metric': stats,
+                'metric': stats,  # stats,
                 'model': self.state_dict(),
                 'optim': optimizer.state_dict(),
                 'args': self.args,
                 'vocab': self.vocab,
             }, fsave)
 
+            # write stats
+            for split in stats.keys():
+                if isinstance(stats[split], dict):
+                    for k, v in stats[split].items():
+                        self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
             pprint.pprint(stats)
+    def create_streaming_dataset(self, task_list):
+        '''
+        创建流式数据集
+        '''
+
+        for task_info in task_list:
+
+            if isinstance(task_info[0], dict):
+                task_path = task_info[0]['task']
+                repeat_idx = task_info[0].get('repeat_idx', 0)
+                swapColor = task_info[1]
+            else:
+                task_path = task_info
+                repeat_idx = 0
+                swapColor = false
+
+            # 数据增强：7种swapColor变体
+            task_data = self.load_streaming_task(task_path, repeat_idx, swapColor)
+            if task_data is not None:
+                yield task_data
+
+    def load_streaming_task(self, task_path, repeat_idx, swapColor):
+        '''
+        流式加载单个任务数据
+        '''
+        try:
+            # 加载JSON数据
+            json_filename = f"{task_path}/pp/ann_{repeat_idx}.json"
+            json_url = hf_hub_url(
+                repo_id=self.args.huggingface_id,
+                filename=json_filename,
+                repo_type="dataset"
+            )
+
+            json_response = requests.get(
+                json_url,
+                timeout=120,
+                stream=False
+            )
+            if json_response.status_code != 200:
+                return None
+
+            ex = json.loads(json_response.content.decode('utf-8'))
+
+            # 加载图像特征
+            if swapColor == 0:
+                pt_filename = f"train/{task_path}/{self.feat_pt}"
+            elif swapColor in [1, 2]:
+                pt_filename = f"train/{task_path}/feat_conv_colorSwap{swapColor}_panoramic.pt"
+            else:
+                pt_filename = f"train/{task_path}/feat_conv_onlyAutoAug{swapColor - 2}_panoramic.pt"
+
+            pt_url = hf_hub_url(
+                repo_id=self.args.huggingface_id,
+                filename=pt_filename,
+                repo_type="dataset"
+            )
+
+            pt_response = requests.get(
+                pt_url,
+                timeout=300,
+                stream=True
+            )
+            if pt_response.status_code != 200:
+                return None
+
+            with io.BytesIO(pt_response.content) as buffer:
+                im = torch.load(buffer)
+
+            return {
+                'ex': ex,
+                'im': im,
+                'task_path': task_path,
+                'repeat_idx': repeat_idx,
+                'swapColor': swapColor
+            }
+
+        except Exception as e:
+            print(f"Error loading task {task_path}: {e}")
+            return None
+    def run_pred_streaming(self, dev, args=None, name='dev', iter=0):
+        '''
+        validation loop by streaming
+        '''
+        args = args or self.args
+        m_dev = collections.defaultdict(list)
+        p_dev = {}
+        self.eval()
+        total_loss = list()
+        dev_iter = iter
+        for batch, feat in self.streaming_iterate(dev, args.batch):
+            out = self.forward(feat)
+            preds = self.extract_preds(out, batch, feat)
+            p_dev.update(preds)
+            loss = self.compute_loss(out, batch, feat)
+            for k, v in loss.items():
+                ln = 'loss_' + k
+                m_dev[ln].append(v.item())
+                self.summary_writer.add_scalar("%s/%s" % (name, ln), v.item(), dev_iter)
+            sum_loss = sum(loss.values())
+            self.summary_writer.add_scalar("%s/loss" % (name), sum_loss, dev_iter)
+            total_loss.append(float(sum_loss.detach().cpu()))
+            dev_iter += len(batch)
+
+        m_dev = {k: sum(v) / len(v) for k, v in m_dev.items()}
+        total_loss = sum(total_loss) / len(total_loss)
+        return p_dev, dev_iter, total_loss, m_dev
     def run_pred(self, dev, args=None, name='dev', iter=0):
         '''
         validation loop
@@ -308,58 +412,25 @@ class Module(nn.Module):
 
     def make_debug_streaming(self, preds, data):
         '''
-        Generates a readable debug output by streaming and processing data in parallel.
-
-        :param preds: Dictionary of predictions keyed by task ID.
-        :param data: The list of task dictionaries from your splits file.
-        :return: A dictionary with debug information.
+        readable output generator for debugging
         '''
-        print(f"Starting debug data generation for {len(data)} tasks using {num_proc} processes...")
 
-        # 1. Convert your list of tasks into a Hugging Face Dataset in memory
-        #    We need to transpose the list of dicts into a dict of lists
-        task_dict = {
-            'task': [t['task'] for t in data],
-            'repeat_idx': [t['repeat_idx'] for t in data]
-        }
-        task_dataset = Dataset.from_dict(task_dict)
-
-        def _fetch_and_extract_info(task):
-            # Fetch the full JSON from the Hub
-            ex = load_task_json_from_hub(self.args.huggingface_id, task, self.args.pp_folder)
-
-            i = get_task_and_ann_id(ex)
-            # ----------------------------------------------------------------
-
-            # Extract the ground truth information
-            lang_goal = ex['turk_annotations']['anns'][ex['ann']['repeat_idx']]['task_desc']
-            action_low = [a['discrete_action']['action'] for a in ex['plan']['low_actions']]
-
-            return {
-                'id': i,
-                'lang_goal': lang_goal,
-                'action_low': action_low,
-            }
-
-        # 3. Apply the function in parallel using .map()
-        #    This is the "batch reading" step. It will fetch and process 'num_proc' tasks at a time.
-        processed_dataset = task_dataset.map(
-            _fetch_and_extract_info,
-            num_proc=num_proc
-        )
-
-        # 4. Assemble the final debug dictionary
-        #    Now we iterate through the PRE-PROCESSED data, which is very fast.
+        data_stream = self.create_streaming_dataset(data)
         debug = {}
-        for item in tqdm(processed_dataset, desc="Assembling debug output"):
-            task_id = item['id']
-            if task_id in preds:
-                debug[task_id] = {
-                    'lang_goal': item['lang_goal'],
-                    'action_low': item['action_low'],
-                    'p_action_low': preds[task_id]['action_low'].split(),
-                }
+        # 'ex': ex,
+        # 'im': im,
+        # 'task_path': task_path,
+        # 'repeat_idx': repeat_idx,
+        # 'swapColor': swapColor
+        for data_item in data_stream:
+            ex = data_item['ex']
+            i = get_task_and_ann_id(ex)
 
+            debug[i] = {
+                'lang_goal': ex['turk_annotations']['anns'][ex['ann']['repeat_idx']]['task_desc'],
+                'action_low': [a['discrete_action']['action'] for a in ex['plan']['low_actions']],
+                'p_action_low': preds[i]['action_low'].split(),
+            }
         return debug
 
     def make_debug(self, preds, data):
@@ -418,17 +489,13 @@ class Module(nn.Module):
         '''
         流式批处理生成器
         '''
-        current_batch = []
-        for data_item in data_stream:
-            current_batch.append(data_item)
-
-            if len(current_batch) >= batch_size:
-                yield current_batch
-                current_batch = []
-
-        # 处理最后不足一个batch的数据
-        if current_batch:
-            yield current_batch
+        error_no = 0
+        try:
+            yield from self.streaming_featurize(data_stream, batch_size)
+        except Exception as e:
+            error_no += 1
+            print(f"no. {error_no} of wrong trajs, {e}")
+            raise e
 
     def validate(self, valid_seen_stream, valid_unseen_stream, global_step):
         '''
@@ -462,39 +529,6 @@ class Module(nn.Module):
 
         self.train()
 
-    def get_task_list_from_hf(self):
-        '''
-        从 Hugging Face 数据集获取任务列表
-        '''
-        from datasets import load_dataset
-
-        # 加载数据集元数据
-        dataset = load_dataset(
-            self.args.huggingface_id,
-            streaming=True,
-            repo_type="dataset"
-        )
-
-        # 获取所有任务路径
-        task_list = []
-        for split in ['train', 'valid_seen', 'valid_unseen']:
-            if split in dataset:
-                for example in dataset[split]:
-                    task_list.append({
-                        'task': example['task'],
-                        'repeat_idx': example.get('repeat_idx', 0)
-                    })
-
-        return task_list
-
-    def cleanup_streaming_resources(self):
-        '''
-        清理流式加载的临时资源
-        '''
-        import gc
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
     def zero_input(self, x, keep_end_token=True):
         '''

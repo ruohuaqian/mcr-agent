@@ -115,4 +115,4 @@ if __name__ == '__main__':
 
     # start train loop
 
-    model.run_train_stream(splits, optimizer=optimizer)
+    model.run_train_stream(splits, args, optimizer=optimizer)
