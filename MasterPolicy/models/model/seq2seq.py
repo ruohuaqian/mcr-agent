@@ -158,97 +158,67 @@ class Module(nn.Module):
         if os.environ.get('HF_TOKEN'):
             login(token=os.environ.get('HF_TOKEN'))
 
-    def run_train_stream(self, splits, optimizer=None):
+    def run_train_stream(self, splits, args=None, optimizer=None):
         '''
-        流式训练循环 - 导航版本
+        training loop - streaming version
         '''
-        self.setup_hf_auth()
-        args = self.args
 
-        # 初始化优化器
-        optimizer = optimizer or torch.optim.Adam(self.parameters(), lr=args.lr)
+        # args
+        args = args or self.args
 
+        # splits
+        train_list = splits['train']
+        # valid_seen = splits['valid_seen']
+        # valid_unseen = splits['valid_unseen']
+
+        train = [(s, False) for s in train_list]
+        train = train + [(s, 1) for s in train_list] + [(s, 2) for s in train_list]
+        train = train + [(s, 3) for s in train_list] + [(s, 4) for s in train_list] + [(s, 5) for s in train_list] + [
+            (s, 6) for s in train_list]
+        # valid_seen = [(s, False) for s in valid_seen]
+        # valid_unseen = [(s, False) for s in valid_unseen]
+
+        # debugging: chose a small fraction of the dataset
+        if self.args.dataset_fraction > 0:
+            small_train_size = int(self.args.dataset_fraction * 0.7)
+            # small_valid_size = int((self.args.dataset_fraction * 0.3) / 2)
+            train = train[:small_train_size]
+            # valid_seen = valid_seen[:small_valid_size]
+            # valid_unseen = valid_unseen[:small_valid_size]
+
+        # debugging: use to check if training loop works without waiting for full epoch
+        if self.args.fast_epoch:
+            train = train[-16:]
+            # valid_seen = valid_seen[:1]
+            # valid_unseen = valid_unseen[:1]
+
+        # initialize summary writer for tensorboardX
         self.summary_writer = SummaryWriter(log_dir=args.dout)
 
-        # 保存配置
-        with open(os.path.join(args.dout, 'config.json'), 'wt') as f:
+        # dump config
+        fconfig = os.path.join(args.dout, 'config.json')
+        with open(fconfig, 'wt') as f:
             json.dump(vars(args), f, indent=2)
 
-        print("Saving to: %s" % args.dout)
-        train_iter = 0
+        # optimizer
+        optimizer = optimizer or torch.optim.Adam(self.parameters(), lr=args.lr)
+
+        # display dout
+        print("Saving to: %s" % self.args.dout)
+        best_loss = {'train': 1e10, 'valid_seen': 1e10, 'valid_unseen': 1e10}
+        train_iter, valid_seen_iter, valid_unseen_iter = 0, 0, 0
 
         for epoch in trange(0, args.epoch, desc='epoch'):
             m_train = collections.defaultdict(list)
             self.train()
             self.adjust_lr(optimizer, args.lr, epoch, decay_epoch=args.decay_epoch)
             total_train_loss = []
-
-            # random the stream（by recreate the original dataset）
-            epoch_train_stream = self.create_streaming_dataset(
-                splits['train'],
-                augment=True,
-                shuffle=True
-            )
-            epoch_valid_seen_stream = self.create_streaming_dataset(
-                splits['valid_seen'],
-                augment=True,
-                shuffle=True)
-
-            epoch_valid_unseen_stream = self.create_streaming_dataset(
-                splits['valid_unseen'],
-                augment=True,
-                shuffle=True)
-
-            if self.args.dataset_fraction > 0:
-                def fraction_stream(stream, fraction, split_name):
-                    total_count = 0
-                    if split_name == 'train':
-                        limit = int(len(splits['train']) * fraction * 0.7)
-                    else:
-                        limit = int(len(splits[split_name]* 0.3)/2)
-                    for item in stream:
-                        if total_count >= limit:
-                            break
-                        yield item
-                        total_count += 1
-
-                epoch_train_stream = fraction_stream(epoch_train_stream, self.args.dataset_fraction, 'train')
-                epoch_valid_seen_stream = fraction_stream(epoch_valid_seen_stream, self.args.dataset_fraction, 'valid_seen')
-                epoch_valid_unseen_stream = fraction_stream(epoch_valid_unseen_stream, self.args.dataset_fraction, 'valid_unseen')
-
-            if self.args.fast_epoch:
-                def limited_stream(data_stream, limit, mode='first'):
-                    if mode == 'first':
-                        # 取前limit个
-                        count = 0
-                        for item in data_stream:
-                            if count >= limit:
-                                break
-                            yield item
-                            count += 1
-
-                    elif mode == 'last':
-                        # use buffer to get last limit
-                        buffer = []
-                        for item in data_stream:
-                            buffer.append(item)
-                            if len(buffer) > limit:
-                                buffer.pop(0)  # 保持缓冲区大小为limit
-
-                        for item in buffer:
-                            yield item
-
-                # equal to train = train[-16:]
-                epoch_train_stream = limited_stream(epoch_train_stream, 16, 'last')
-                # equal to valid_seen = valid_seen[:1]
-                epoch_valid_seen_stream = limited_stream(epoch_valid_seen_stream, 1, 'first')
-                # equal to valid_unseen = valid_unseen[:1]
-                epoch_valid_unseen_stream = limited_stream(epoch_valid_unseen_stream, 1, 'first')
-
-            for batch in self.streaming_iterate(epoch_train_stream, args.batch):
+            random.shuffle(train)
+            c_st = 0
+            epoch_train_stream = self.create_streaming_dataset(train)
+            for batch, feat in self.streaming_iterate(epoch_train_stream, args.batch):
+                c_st += 1
                 try:
-                    feat = self.streaming_featurize(batch)
-
                     out = self.forward(feat)
                     loss = self.compute_loss(out, batch, feat)
 
@@ -266,14 +236,14 @@ class Module(nn.Module):
 
                     self.summary_writer.add_scalar('train/loss', sum_loss, train_iter)
                     total_train_loss.append(float(sum_loss.detach().cpu()))
-                    train_iter += self.args.batch
+                    train_iter += args.batch
 
                 except Exception as e:
                     print(f"Error in batch processing: {e}")
                     continue
 
             # 保存检查点
-            stats = {'epoch': epoch}
+            stats = {'epoch': epoch, c_st:c_st}
 
             # save the latest checkpoint
             if args.save_every_epoch:
@@ -295,13 +265,10 @@ class Module(nn.Module):
                         self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
             pprint.pprint(stats)
 
-    def create_streaming_dataset(self, task_list, augment=False, shuffle=False):
+    def create_streaming_dataset(self, task_list):
         '''
         创建流式数据集 - 导航版本
         '''
-        if shuffle:
-            import random
-            task_list = random.sample(task_list, len(task_list))
 
         for task_info in task_list:
             if isinstance(task_info, dict):
@@ -311,12 +278,12 @@ class Module(nn.Module):
                 task_path = task_info
                 repeat_idx = 0
 
-            if augment:
+            if task_info['swap']:
                 # 数据增强：7种swapColor变体
-                for swapColor in range(7):
-                    task_data = self.load_streaming_task(task_path, repeat_idx, swapColor)
-                    if task_data is not None:
-                        yield task_data
+                swapColor = task_info['swapColor']
+                task_data = self.load_streaming_task(task_path, repeat_idx, swapColor)
+                if task_data is not None:
+                    yield task_data
             else:
                 # 无数据增强
                 task_data = self.load_streaming_task(task_path, repeat_idx, False)
@@ -369,7 +336,7 @@ class Module(nn.Module):
                 return None
 
             with io.BytesIO(pt_response.content) as buffer:
-                im = torch.load(buffer, map_location='cpu')
+                im = torch.load(buffer)
 
             return {
                 'ex': ex,
@@ -387,8 +354,16 @@ class Module(nn.Module):
         '''
         流式批处理生成器
         '''
+        error_no = 0
+        count = 0
         current_batch = []
+        for i in trange(0, count, batch_size, desc='batch'):
+            feat = self.streaming_featurize(data_stream, batch_size)
+            current_batch.append(data)
+            count += 1
+
         for data_item in data_stream:
+            task
             if data_item is None:
                 continue
 
@@ -399,7 +374,7 @@ class Module(nn.Module):
                 current_batch = []
 
         if current_batch:
-            yield current_batch
+            yield current_batch, feat
 
 
     def run_pred_streaming(self, dev, args=None, name='dev', iter=0):
@@ -461,7 +436,7 @@ class Module(nn.Module):
 
     def featurize(self, batch):
         raise NotImplementedError()
-    def streaming_featurize(self, batch_data):
+    def streaming_featurize(self, data_stream, batch_size):
         raise NotImplementedError()
     def forward(self, feat, max_decode=100):
         raise NotImplementedError()

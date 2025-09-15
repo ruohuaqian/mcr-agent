@@ -269,134 +269,152 @@ class Module(Base):
 
         return feat
 
-    def streaming_featurize(self, batch_data, load_mask=True, load_frames=True):
+    def streaming_featurize(self, data_stream, batch_size, load_mask=True, load_frames=True):
         '''
         tensorize and pad batch input-streaming version
         '''
         device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
-        feat = collections.defaultdict(list)
+        batch_feat = collections.defaultdict(list)
 
-        for data_item in batch_data:
-            if data_item is None:
-                self._add_empty_features(feat, device)  # use the same device
-                continue
-            ex = data_item['ex']
-            im = data_item['im']
-            try:
-                # 辅助特征提取
-                action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
-                low_to_high_idx = ex['num']['low_to_high_idx']
-                action_high = action_high_order[low_to_high_idx]
-                feat['action_high'].append(action_high)
-                feat['action_high_order'].append(action_high_order)
+        for data_item in data_stream:
+            if data_item is not None:
+                feat_one = self._fill_feature_one(data_item, device, load_mask, load_frames, )
+                if feat_one is None:
+                    self._keep_empty_in_batch(batch_feat, device)
+                else:
+                    for feature_name, value in feat_one.items():
+                        batch_feat[feature_name].append(value)
 
-                # GotoLocation validation - fix the index problem
-                val_action_high = (action_high == self.vocab['action_high'].word2index('GotoLocation', train=False)).astype(np.int64)
 
-                v = 0
-                while v < (len(val_action_high) - 1):
-                    if (val_action_high[v] - val_action_high[v + 1]) == 1:
-                        val_action_high[v + 1] = 1
-                        v += 1
+
+        assert(np.all(np.array(list(map(len, batch_feat['lang_instr']))) == np.array(list(map(len, batch_feat['objnav'])))))
+        # tensorize and fill
+        batch_feat = self._tensorize_and_pad(batch_feat, device)
+
+        yield batch_feat
+
+
+    def _fill_feature_one(self, data_item, device, load_mask=True, load_frames=True):
+        feat_one = dict()
+
+        ex = data_item['ex']
+        im = data_item['im']
+        try:
+            # 辅助特征提取
+            action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
+            low_to_high_idx = ex['num']['low_to_high_idx']
+            action_high = action_high_order[low_to_high_idx]
+            feat_one['action_high'] = action_high
+            feat_one['action_high_order'] = action_high_order
+
+            # GotoLocation validation - fix the index problem
+            val_action_high = (action_high == self.vocab['action_high'].word2index('GotoLocation', train=False)).astype(
+                np.int64)
+
+            v = 0
+            while v < (len(val_action_high) - 1):
+                if (val_action_high[v] - val_action_high[v + 1]) == 1:
+                    val_action_high[v + 1] = 1
                     v += 1
-                val_action_high[-1] = 1
+                v += 1
+            val_action_high[-1] = 1
 
-                #########
-                # inputs
-                #########
+            #########
+            # inputs
+            #########
 
-                # serialize segments
-                self.serialize_lang_action(ex, action_high_order)
+            # serialize segments
+            self.serialize_lang_action(ex, action_high_order)
 
-                # goal and instr language
-                lang_goal, lang_instr = ex['num']['lang_goal'], ex['num']['lang_instr']
+            # goal and instr language
+            lang_goal, lang_instr = ex['num']['lang_goal'], ex['num']['lang_instr']
 
-                # zero inputs if specified
-                lang_goal = self.zero_input(lang_goal) if self.args.zero_goal else lang_goal
-                lang_instr = self.zero_input(lang_instr) if self.args.zero_instr else lang_instr
+            # zero inputs if specified
+            lang_goal = self.zero_input(lang_goal) if self.args.zero_goal else lang_goal
+            lang_instr = self.zero_input(lang_instr) if self.args.zero_instr else lang_instr
 
-                # append goal + instr
-                feat['lang_goal'].append(lang_goal)
-                feat['lang_instr'].append(lang_instr)
+            # append goal + instr
+            feat_one['lang_goal'] = lang_goal
+            feat_one['lang_instr'] = lang_instr
 
-                #########
-                # outputs
-                #########
-                alow = []
-                alow_manip = []
-                obj_high_indices = []
+            #########
+            # outputs
+            #########
+            alow = []
+            alow_manip = []
+            obj_high_indices = []
 
-                for ia, a in enumerate(ex['num']['action_low']):
-                    nav_actions = ['<<pad>>', '<<seg>>', '<<stop>>', 'LookDown_15', 'LookUp_15',
-                                   'RotateLeft_90', 'RotateRight_90', 'MoveAhead_25']
+            for ia, a in enumerate(ex['num']['action_low']):
+                nav_actions = ['<<pad>>', '<<seg>>', '<<stop>>', 'LookDown_15', 'LookUp_15',
+                               'RotateLeft_90', 'RotateRight_90', 'MoveAhead_25']
 
-                    if val_action_high[ia] == 1 and a['action'] in self.vocab['action_low'].word2index(nav_actions,
-                                                                                                       train=False):
-                        alow.append(a['action'])
-                    elif val_action_high[ia] == 1:
-                        alow.append(self.vocab['action_low'].word2index('Manipulate', train=False))
+                if val_action_high[ia] == 1 and a['action'] in self.vocab['action_low'].word2index(nav_actions,
+                                                                                                   train=False):
+                    alow.append(a['action'])
+                elif val_action_high[ia] == 1:
+                    alow.append(self.vocab['action_low'].word2index('Manipulate', train=False))
 
-                    if a['action'] not in self.vocab['action_low'].word2index(nav_actions, train=False):
-                        alow_manip.append(a['action'])
-                        obj_high_indices.append(low_to_high_idx[ia])
+                if a['action'] not in self.vocab['action_low'].word2index(nav_actions, train=False):
+                    alow_manip.append(a['action'])
+                    obj_high_indices.append(low_to_high_idx[ia])
 
-                feat['action_low'].append(alow)
-                feat['action_low_manip'].append(alow_manip)
-                feat['obj_high_indices'].append(obj_high_indices)
+            feat_one['action_low'] = alow
+            feat_one['action_low_manip'] = alow_manip
+            feat_one['obj_high_indices'] = obj_high_indices
 
-                # 辅助损失
-                if self.args.subgoal_aux_loss_wt > 0:
-                    completed_indices = val_action_high.nonzero()[0].astype(int)
-                    if len(completed_indices) > 0:
-                        subgoals_completed = np.array(ex['num']['low_to_high_idx'])[
-                                                 completed_indices] / self.max_subgoals
-                        feat['subgoals_completed'].append(subgoals_completed)
-                    else:
-                        feat['subgoals_completed'].append(np.array([]))
+            # 辅助损失
+            if self.args.subgoal_aux_loss_wt > 0:
+                completed_indices = val_action_high.nonzero()[0].astype(int)
+                if len(completed_indices) > 0:
+                    subgoals_completed = np.array(ex['num']['low_to_high_idx'])[
+                                             completed_indices] / self.max_subgoals
+                    feat_one['subgoals_completed'] = subgoals_completed
+                else:
+                    feat_one['subgoals_completed'] = np.array([])
 
-                if self.args.pm_aux_loss_wt > 0:
-                    num_actions = len(alow)
-                    if num_actions > 0:
-                        subgoal_progress = [(i + 1) / float(num_actions) for i in range(num_actions)]
-                        feat['subgoal_progress'].append(subgoal_progress)
-                    else:
-                        feat['subgoal_progress'].append([])
+            if self.args.pm_aux_loss_wt > 0:
+                num_actions = len(alow)
+                if num_actions > 0:
+                    subgoal_progress = [(i + 1) / float(num_actions) for i in range(num_actions)]
+                    feat_one['subgoal_progress'] = subgoal_progress
+                else:
+                    feat_one['subgoal_progress'] = []
 
-                # 对象导航和掩码
-                obj_list = [self.vocab['objnav'].word2index('<<nav>>')]
-                high_idx = 0
+            # 对象导航和掩码
+            obj_list = [self.vocab['objnav'].word2index('<<nav>>')]
+            high_idx = 0
 
-                if load_mask:
-                    indices = []
+            if load_mask:
+                indices = []
 
-                    for a in ex['plan']['low_actions']:
-                        if a['api_action']['action'] in ['MoveAhead', 'LookUp', 'LookDown', 'RotateRight',
-                                                         'RotateLeft']:
-                            if a['high_idx'] == (high_idx + 1):
-                                obj_list.append(self.vocab['objnav'].word2index('<<nav>>', train=False))
-                                high_idx += 1
-                            continue
-                        if a['api_action']['action'] == 'PutObject':
-                            label = a['api_action']['receptacleObjectId'].split('|')
-                        else:
-                            label = a['api_action']['objectId'].split('|')
-                        indices.append(classes.index(label[4].split('_')[0] if len(label) >= 5 else label[0]))
-                        # obj_high_indices.append(high_idx)
-
+                for a in ex['plan']['low_actions']:
+                    if a['api_action']['action'] in ['MoveAhead', 'LookUp', 'LookDown', 'RotateRight',
+                                                     'RotateLeft']:
                         if a['high_idx'] == (high_idx + 1):
-                            # if obj_list[-1] != self.vocab['objnav'].word2index((label[4].split('_')[0] if len(label) >= 5 else label[0]).lower(), train=False):
-                            obj_list.append(self.vocab['objnav'].word2index(
-                                (label[4].split('_')[0] if len(label) >= 5 else label[0]).lower(), train=False))
+                            obj_list.append(self.vocab['objnav'].word2index('<<nav>>', train=False))
                             high_idx += 1
+                        continue
+                    if a['api_action']['action'] == 'PutObject':
+                        label = a['api_action']['receptacleObjectId'].split('|')
+                    else:
+                        label = a['api_action']['objectId'].split('|')
+                    indices.append(classes.index(label[4].split('_')[0] if len(label) >= 5 else label[0]))
+                    # obj_high_indices.append(high_idx)
 
-                    new_obj_list = [obj_list[o + 1] for o, obj in enumerate(obj_list) if
-                                    (obj == self.vocab['objnav'].word2index('<<nav>>'))]
+                    if a['high_idx'] == (high_idx + 1):
+                        # if obj_list[-1] != self.vocab['objnav'].word2index((label[4].split('_')[0] if len(label) >= 5 else label[0]).lower(), train=False):
+                        obj_list.append(self.vocab['objnav'].word2index(
+                            (label[4].split('_')[0] if len(label) >= 5 else label[0]).lower(), train=False))
+                        high_idx += 1
 
-                    feat['objnav'].append(new_obj_list)
-                    feat['action_low_mask_label'].append(indices)
+                new_obj_list = [obj_list[o + 1] for o, obj in enumerate(obj_list) if
+                                (obj == self.vocab['objnav'].word2index('<<nav>>'))]
 
+                feat_one['objnav'] = new_obj_list
+                feat_one['action_low_mask_label'] = indices
 
-                # 图像特征处理 - make sure 在CPU上处理，后续会转移到正确设备
+            # 图像特征处理 - make sure 在CPU上处理，后续会转移到正确设备
+            if load_frames and not self.test_mode:
                 val_indices = val_action_high.nonzero()[0]
 
                 if len(im) >= 5 and len(val_indices) > 0:
@@ -405,44 +423,39 @@ class Module(Base):
                         valid_indices = val_indices[val_indices < len(im[0])]
 
                         if len(valid_indices) > 0:
-                            feat['frames'].append(im[2][valid_indices])  # main view
-                            feat['frames_left'].append(im[0][valid_indices])  # left view
-                            feat['frames_up'].append(im[1][valid_indices])  # up
-                            feat['frames_down'].append(im[3][valid_indices])  # down
-                            feat['frames_right'].append(im[4][valid_indices])  # right
+                            feat_one['frames'] = im[2][valid_indices] # main view
+                            feat_one['frames_left'] = im[0][valid_indices]  # left view
+                            feat_one['frames_up'] = im[1][valid_indices]  # up
+                            feat_one['frames_down'] = im[3][valid_indices]  # down
+                            feat_one['frames_right'] = im[4][valid_indices]  # right
                         else:
-                            self._add_empty_image_features(feat, device)
+                            self._add_empty_image_features(feat_one, device)
 
                     except IndexError as e:
                         print(f"Image index error: {e}")
-                        self._add_empty_image_features(feat, device)
+                        feat_one = self._add_empty_image_features(feat_one, device)
                 else:
-                    self._add_empty_image_features(feat, device)
+                    feat_one =self._add_empty_image_features(feat_one, device)
 
-            except Exception as e:
-                print(f"Error processing task: {e}")
-                self._add_empty_features(feat, device)
-                continue
+                if self.orientation:
+                    feat_one = self._add_orientation_features(feat_one, device)
+        except Exception as e:
+            print(f"Error processing task: {e}")
+            return None
+        return feat_one
 
-        if self.orientation:
-            feat = self._add_orientation_features(feat, device)
+    def _add_empty_image_features(self, feat_one, device):
+        empty_tensor = torch.tensor([], device=device, dtype=torch.float)
+        for view in ['frames', 'frames_left', 'frames_up', 'frames_down', 'frames_right']:
+            feat_one[view] = empty_tensor
+        return feat_one
 
-        assert(np.all(np.array(list(map(len, feat['lang_instr']))) == np.array(list(map(len, feat['objnav'])))))
-        # tensorize and fill
-        feat = self._tensorize_and_pad(feat, device)
-
-        return feat
-
-    def _add_empty_image_features(self, feat, device):
-        '''添加空的图像特征'''
+    def _keep_empty_in_batch(self, feat, device):
+        '''添加所有空特征'''
+        # 图像特征
         empty_tensor = torch.tensor([], device=device, dtype=torch.float)
         for view in ['frames', 'frames_left', 'frames_up', 'frames_down', 'frames_right']:
             feat[view].append(empty_tensor)
-
-    def _add_empty_features(self, feat, device):
-        '''添加所有空特征'''
-        # 图像特征
-        self._add_empty_image_features(feat, device)
 
         # 其他特征
         empty_lists = ['action_high', 'action_high_order', 'lang_goal', 'lang_instr',
@@ -453,6 +466,7 @@ class Module(Base):
             if key not in feat:
                 feat[key] = []
             feat[key].append([] if key != 'subgoals_completed' else np.array([]))
+        return feat
 
     def _tensorize_and_pad(self, feat, device):
         for k, v in feat.items():
@@ -513,7 +527,7 @@ class Module(Base):
         return feat
 
 
-    def _add_orientation_features(self, feat, device):
+    def _add_orientation_features(self, feat_one, device):
 
         import math
 
@@ -530,10 +544,10 @@ class Module(Base):
                 h, v = 0.0, 0.0
 
             orientation = torch.cat([
-                torch.cos(torch.ones(1, device=device) * h),
-                torch.sin(torch.ones(1, device=device) * h),
-                torch.cos(torch.ones(1, device=device) * v),
-                torch.sin(torch.ones(1, device=device) * v),
+                torch.cos(torch.ones(1) * h),
+                torch.sin(torch.ones(1) * h),
+                torch.cos(torch.ones(1) * v),
+                torch.sin(torch.ones(1) * v),
             ]).unsqueeze(-1).unsqueeze(-1).repeat(1, 7, 7)
 
             return orientation
@@ -548,30 +562,30 @@ class Module(Base):
         }
 
         for view_key, direction in orientation_mapping.items():
-            view_tensor = feat[view_key][-1]
+            view_tensor = feat_one[view_key]
             orientation_tensor = get_orientation(direction, device).repeat(len(view_tensor))
-            feat[view_key][-1] = torch.cat([view_tensor, orientation_tensor, 1, 1, 1], dim=1)
+            feat_one[view_key] = torch.cat([view_tensor, orientation_tensor, 1, 1, 1], dim=1)
 
-        return feat
+        return feat_one
 
 
-    def serialize_lang_action(self, feat, action_high_order):
+    def serialize_lang_action(self, ex, action_high_order):
         '''
         append segmented instr language and low-level actions into single sequences
         '''
-        assert(len(action_high_order) == len(feat['num']['lang_instr']))
+        assert(len(action_high_order) == len(ex['num']['lang_instr']))
         action_high_order = (action_high_order == self.vocab['action_high'].word2index('GotoLocation', train=False)).nonzero()[0]
         li = []
         for ai in range(len(action_high_order)-1):
-            li.append([word for desc in feat['num']['lang_instr'][action_high_order[ai]:action_high_order[ai+1]] for word in desc])
+            li.append([word for desc in ex['num']['lang_instr'][action_high_order[ai]:action_high_order[ai+1]] for word in desc])
         
-        li.append([word for desc in feat['num']['lang_instr'][action_high_order[-1]:] for word in desc])
+        li.append([word for desc in ex['num']['lang_instr'][action_high_order[-1]:] for word in desc])
 
-        feat['num']['lang_instr'] = li
+        ex['num']['lang_instr'] = li
 
 
         # if not self.test_mode:
-        feat['num']['action_low'] = [a for a_group in feat['num']['action_low'] for a in a_group]
+        ex['num']['action_low'] = [a for a_group in ex['num']['action_low'] for a in a_group]
 
 
     def decompress_mask(self, compressed_mask):

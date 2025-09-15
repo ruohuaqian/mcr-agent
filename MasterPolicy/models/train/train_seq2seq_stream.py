@@ -115,4 +115,4 @@ if __name__ == '__main__':
             optimizer_to(optimizer, torch.device('cuda'))
 
     # 开始训练
-    model.run_train_stream(splits)
+    model.run_train_stream(splits, args)
