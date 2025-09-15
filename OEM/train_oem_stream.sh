@@ -1,18 +1,5 @@
 #!/usr/bin/env bash
-#
-# Description:
-#   This script serves as a unified launcher for training the MCR-Agent's OEM model.
-#   It supports both the traditional local file pipeline and the new Hugging Face
-#   streaming pipeline, controlled by the --use_streaming / --no-streaming flags.
-#
-# Usage:
-#   ./train_script.sh --use_streaming --batch 32 --epoch 50 --dout /path/to/output
-#   ./train_script.sh --no-streaming --data /path/to/local/data
-#
 
-# Exit immediately if a command exits with a non-zero status.
-# Treat unset variables as an error.
-# The return value of a pipeline is the status of the last command to exit with a non-zero status.
 set -euo pipefail
 
 # ===================== Defaults =====================
@@ -62,9 +49,9 @@ ACTOR_DROPOUT=0.0
 
 DEC_TEACHER_FORCING=0
 TEMP_NO_HISTORY=0
-PANORAMIC=0
-ORIENTATION=0
-PANORAMIC_CONCAT=0
+PANORAMIC=1
+ORIENTATION=1
+PANORAMIC_CONCAT=1
 
 FAST_EPOCH=0
 DATASET_FRACTION=0

@@ -321,7 +321,7 @@ class Module(Base):
             feat_one['action_high'] = action_high
             feat_one['action_high_order'] = action_high_order
 
-            # GotoLocation validation - fix the index problem
+            # GotoLocation validation
             val_action_high = (action_high == self.vocab['action_high'].word2index('GotoLocation', train=False)).astype(
                 np.int64)
 

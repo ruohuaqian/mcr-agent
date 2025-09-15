@@ -9,7 +9,6 @@ from torch import nn
 from tensorboardX import SummaryWriter
 from tqdm import trange
 from PCC.models.model import constants
-from PCC.models.model.alfred_streaming_dataset import ALFREDStreamingDataset
 classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp', 'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
 import torch.nn.functional as F
 

@@ -173,4 +173,4 @@ if __name__ == '__main__':
     # start train loop
     # - 若 optimizer=None，由模型内部/训练函数创建新的优化器（推荐微调时如此）
     # - 若使用 --resume 且未 --reset_optim，则沿用旧优化器继续训练
-    model.run_train_stream(splits, optimizer=optimizer)
+    model.run_train_stream(splits, args, optimizer=optimizer)

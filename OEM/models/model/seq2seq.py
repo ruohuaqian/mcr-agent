@@ -152,80 +152,68 @@ class Module(nn.Module):
         if os.environ.get('HF_TOKEN'):
             login(token=os.environ.get('HF_TOKEN'))
 
-    def run_train_stream(self, splits, optimizer=None):
+    def run_train_stream(self, splits, args=None, optimizer=None):
         '''
-        流式训练循环 - 导航版本（无数据增强）
+        training loop - streaming version
         '''
         self.setup_hf_auth()
         args = self.args
 
-        # 创建流式数据集（无数据增强）
-        train_stream = self.create_streaming_dataset(splits['train'], augment=False)
-        valid_seen_stream = self.create_streaming_dataset(splits['valid_seen'], augment=False)
-        valid_unseen_stream = self.create_streaming_dataset(splits['valid_unseen'], augment=False)
+        # splits
+        train_list = splits['train']
+        # valid_seen = splits['valid_seen']
+        # valid_unseen = splits['valid_unseen']
 
-        # 调试模式处理
-        if self.args.fast_epoch:
-            def limited_stream(stream, limit):
-                count = 0
-                for item in stream:
-                    if count >= limit:
-                        break
-                    yield item
-                    count += 1
+        train = [(s, False) for s in train_list]
+        train = train + [(s, 1) for s in train_list] + [(s, 2) for s in train_list]
+        train = train + [(s, 3) for s in train_list] + [(s, 4) for s in train_list] + [(s, 5) for s in train_list] + [
+            (s, 6) for s in train_list]
+        # valid_seen = [(s, False) for s in valid_seen]
+        # valid_unseen = [(s, False) for s in valid_unseen]
 
-            train_stream = limited_stream(train_stream, 16)
-            valid_seen_stream = limited_stream(valid_seen_stream, 1)
-            valid_unseen_stream = limited_stream(valid_unseen_stream, 1)
-
-        # 数据集分数处理
+        # debugging: chose a small fraction of the dataset
         if self.args.dataset_fraction > 0:
-            def fraction_stream(stream, fraction):
-                total_count = 0
-                limit = int(len(splits['train']) * fraction * 0.7)
-                for item in stream:
-                    if total_count >= limit:
-                        break
-                    yield item
-                    total_count += 1
+            small_train_size = int(self.args.dataset_fraction * 0.7)
+            # small_valid_size = int((self.args.dataset_fraction * 0.3) / 2)
+            train = train[:small_train_size]
+            # valid_seen = valid_seen[:small_valid_size]
+            # valid_unseen = valid_unseen[:small_valid_size]
 
-            train_stream = fraction_stream(train_stream, self.args.dataset_fraction)
+        # debugging: use to check if training loop works without waiting for full epoch
+        if self.args.fast_epoch:
+            train = train[-16:]
+            # valid_seen = valid_seen[:1]
+            # valid_unseen = valid_unseen[:1]
 
-        # 初始化优化器
-        optimizer = optimizer or torch.optim.Adam(self.parameters(), lr=args.lr)
+        # initialize summary writer for tensorboardX
+        self.summary_writer = SummaryWriter(log_dir=args.dout)
 
-        # 初始化SummaryWriter
-        try:
-            from torch.utils.tensorboard import SummaryWriter
-            self.summary_writer = SummaryWriter(log_dir=args.dout)
-        except ImportError:
-            self.summary_writer = None
-            print("[WARN] TensorBoard not available, skipping logging")
-
-        # 保存配置
-        with open(os.path.join(args.dout, 'config.json'), 'wt') as f:
+        # dump config
+        fconfig = os.path.join(args.dout, 'config.json')
+        with open(fconfig, 'wt') as f:
             json.dump(vars(args), f, indent=2)
 
-        print("Saving to: %s" % args.dout)
-        train_iter = 0
+        # optimizer
+        optimizer = optimizer or torch.optim.Adam(self.parameters(), lr=args.lr)
+
+        # display dout
+        print("Saving to: %s" % self.args.dout)
+        best_loss = {'train': 1e10, 'valid_seen': 1e10, 'valid_unseen': 1e10}
+        train_iter, valid_seen_iter, valid_unseen_iter = 0, 0, 0
 
         for epoch in trange(0, args.epoch, desc='epoch'):
             m_train = collections.defaultdict(list)
             self.train()
-            self.adjust_lr(optimizer, args.lr, epoch, args.decay_epoch)
+            self.adjust_lr(optimizer, args.lr, epoch, decay_epoch=args.decay_epoch)
             total_train_loss = []
-
-            # 随机打乱流式数据
-            epoch_train_list = list(self.create_streaming_dataset(splits['train'], augment=False))
-            import random
-            random.shuffle(epoch_train_list)
-            epoch_train_stream = iter(epoch_train_list)
+            random.shuffle(train)
+            c_st = 0
+            epoch_train_stream = self.create_streaming_dataset(train)
 
             batch_count = 0
-            for batch in self.streaming_iterate(epoch_train_stream, args.batch):
+            for batch, feat in self.streaming_iterate(epoch_train_stream, args.batch):
+                c_st += 1
                 try:
-                    feat = self.streaming_featurize(batch)
-
                     out = self.forward(feat)
                     loss = self.compute_loss(out, batch, feat)
 
@@ -256,29 +244,31 @@ class Module(nn.Module):
             stats = {'epoch': epoch}
             self.save_checkpoint(epoch, batch_count, optimizer, args.dout)
 
-            # 记录统计信息
-            if self.summary_writer:
-                for split in stats.keys():
-                    if isinstance(stats[split], dict):
-                        for k, v in stats[split].items():
-                            self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
+            # write stats
+            for split in stats.keys():
+                if isinstance(stats[split], dict):
+                    for k, v in stats[split].items():
+                        self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
+            pprint.pprint(stats)
 
-            print(f"Epoch {epoch} completed, processed {batch_count} batches")
+    def create_streaming_dataset(self, task_list):
+        '''
+        创建流式数据集 - 导航版本
+        '''
 
-    def create_streaming_dataset(self, task_list, augment=False):
-        '''
-        创建流式数据集 - 无数据增强版本
-        '''
         for task_info in task_list:
-            if isinstance(task_info, dict):
-                task_path = task_info['task']
-                repeat_idx = task_info.get('repeat_idx', 0)
+
+            if isinstance(task_info[0], dict):
+                task_path = task_info[0]['task']
+                repeat_idx = task_info[0].get('repeat_idx', 0)
+                swapColor = task_info[1]
             else:
                 task_path = task_info
                 repeat_idx = 0
+                swapColor = false
 
-            # 无数据增强，只使用 swapColor=False
-            task_data = self.load_streaming_task(task_path, repeat_idx, False)
+            # 数据增强：7种swapColor变体
+            task_data = self.load_streaming_task(task_path, repeat_idx, swapColor)
             if task_data is not None:
                 yield task_data
 
@@ -344,226 +334,15 @@ class Module(nn.Module):
         '''
         流式批处理生成器
         '''
-        current_batch = []
-        for data_item in data_stream:
-            if data_item is None:
-                continue
+        error_no = 0
+        try:
+            yield from self.streaming_featurize(data_stream, batch_size)
+        except Exception as e:
+            error_no += 1
+            print(f"no. {error_no} of wrong trajs, {e}")
+            raise e
 
-            current_batch.append(data_item)
 
-            if len(current_batch) >= batch_size:
-                yield current_batch
-                current_batch = []
-
-        if current_batch:
-            yield current_batch
-
-    def streaming_featurize(self, batch_data):
-        '''
-        流式特征处理 - 导航版本
-        '''
-        device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
-        feat = collections.defaultdict(list)
-
-        for data_item in batch_data:
-            if data_item is None:
-                continue
-
-            ex = data_item['ex']
-            swapColor = data_item['swapColor']
-            im_data = data_item['im']
-
-            try:
-                # 辅助特征提取
-                action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
-                low_to_high_idx = ex['num']['low_to_high_idx']
-                action_high = action_high_order[low_to_high_idx]
-
-                feat['action_high'].append(action_high)
-                feat['action_high_order'].append(action_high_order)
-
-                # GotoLocation 验证
-                val_action_high = (
-                            action_high == self.vocab['action_high'].word2index('GotoLocation', train=False)).astype(
-                    np.int64)
-
-                v = 0
-                while v < (len(val_action_high) - 1):
-                    if (val_action_high[v] - val_action_high[v + 1]) == 1:
-                        val_action_high[v + 1] = 1
-                        v += 1
-                    v += 1
-                val_action_high[-1] = 1
-
-                # 序列化语言动作
-                self.serialize_lang_action(ex, action_high_order)
-
-                # 语言处理
-                lang_goal, lang_instr = ex['num']['lang_goal'], ex['num']['lang_instr']
-                lang_goal = self.zero_input(lang_goal) if self.args.zero_goal else lang_goal
-                lang_instr = self.zero_input(lang_instr) if self.args.zero_instr else lang_instr
-
-                feat['lang_goal'].append(lang_goal)
-                feat['lang_instr'].append(lang_instr)
-
-                # 动作处理
-                alow = []
-                alow_manip = []
-                obj_high_indices = []
-
-                for ia, a in enumerate(ex['num']['action_low']):
-                    if val_action_high[ia] == 1 and a['action'] in self.vocab['action_low'].word2index(
-                            ['<<pad>>', '<<seg>>', '<<stop>>', 'LookDown_15', 'LookUp_15', 'RotateLeft_90',
-                             'RotateRight_90', 'MoveAhead_25'], train=False):
-                        alow.append(a['action'])
-                    elif val_action_high[ia] == 1:
-                        alow.append(self.vocab['action_low'].word2index('Manipulate', train=False))
-
-                    if not (a['action'] in self.vocab['action_low'].word2index(
-                            ['<<pad>>', '<<seg>>', '<<stop>>', 'LookDown_15', 'LookUp_15', 'RotateLeft_90',
-                             'RotateRight_90', 'MoveAhead_25'], train=False)):
-                        alow_manip.append(a['action'])
-                        obj_high_indices.append(low_to_high_idx[ia])
-
-                feat['action_low'].append(alow)
-                feat['action_low_manip'].append(alow_manip)
-                feat['obj_high_indices'].append(obj_high_indices)
-
-                # 辅助损失
-                if self.args.subgoal_aux_loss_wt > 0:
-                    feat['subgoals_completed'].append(
-                        np.array(ex['num']['low_to_high_idx'])[
-                            val_action_high.nonzero()[0].astype(int)] / self.max_subgoals
-                    )
-
-                if self.args.pm_aux_loss_wt > 0:
-                    num_actions = len(alow)
-                    subgoal_progress = [(i + 1) / float(num_actions) for i in range(num_actions)]
-                    feat['subgoal_progress'].append(subgoal_progress)
-
-                # 对象导航和掩码
-                obj_list = [0]  # 使用0代替 '<<nav>>'
-                high_idx = 0
-                indices = []
-
-                for a in ex['plan']['low_actions']:
-                    if a['api_action']['action'] in ['MoveAhead', 'LookUp', 'LookDown', 'RotateRight', 'RotateLeft']:
-                        if a['high_idx'] == (high_idx + 1):
-                            obj_list.append(0)  # 导航标记
-                            high_idx += 1
-                        continue
-
-                    if a['api_action']['action'] == 'PutObject':
-                        label = a['api_action']['receptacleObjectId'].split('|')
-                    else:
-                        label = a['api_action']['objectId'].split('|')
-
-                    try:
-                        class_name = label[4].split('_')[0] if len(label) >= 5 else label[0]
-                        indices.append(classes.index(class_name))
-                    except (IndexError, ValueError):
-                        indices.append(0)
-
-                    if a['high_idx'] == (high_idx + 1):
-                        try:
-                            class_name = (label[4].split('_')[0] if len(label) >= 5 else label[0])
-                            obj_list.append(classes.index(class_name))
-                        except:
-                            obj_list.append(0)  # 导航标记
-                        high_idx += 1
-
-                new_obj_list = [obj_list[o + 1] for o, obj in enumerate(obj_list) if obj == 0]
-                feat['objnav'].append(new_obj_list)
-                feat['action_low_mask_label'].append(indices)
-
-            except Exception as e:
-                print(f"Error processing task {data_item.get('task_path', 'unknown')}: {e}")
-                continue
-
-        # 张量化和填充
-        return self._tensorize_and_pad(feat, device)
-
-    def _tensorize_and_pad(self, feat, device):
-        '''
-        张量化和填充逻辑
-        '''
-        for k, v in feat.items():
-            try:
-                if k in {'lang_goal'}:
-                    # 语言特征处理
-                    seqs = [torch.tensor(vv, device=device) for vv in v if len(vv) > 0]
-                    if seqs:
-                        pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
-                        seq_lengths = np.array([len(vv) for vv in v if len(vv) > 0])
-                        embed_seq = self.emb_word(pad_seq)
-                        packed_input = pack_padded_sequence(embed_seq, seq_lengths, batch_first=True,
-                                                            enforce_sorted=False)
-                        feat[k] = packed_input
-                    else:
-                        feat[k] = None
-
-                elif k in {'lang_instr'}:
-                    # 指令处理
-                    num_instr = np.array([len(vv) for vv in v])
-                    seqs = [torch.tensor(vvv, device=device) for vv in v for vvv in vv if len(vv) > 0]
-
-                    if seqs:
-                        pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
-                        embed_seq = self.emb_word(pad_seq)
-                        feat[k] = {'seq': embed_seq, 'len': num_instr}
-                    else:
-                        feat[k] = {'seq': torch.tensor([], device=device), 'len': num_instr}
-
-                elif k in {'action_low_mask'}:
-                    seqs = [torch.tensor(vv, device=device, dtype=torch.float) for vv in v if len(vv) > 0]
-                    feat[k] = seqs
-
-                elif k in {'action_low_mask_label'}:
-                    if v and any(len(vv) > 0 for vv in v):
-                        seqs = torch.tensor([vvv for vv in v for vvv in vv], device=device, dtype=torch.long)
-                        feat[k] = seqs
-                    else:
-                        feat[k] = torch.tensor([], device=device, dtype=torch.long)
-
-                elif k in {'subgoal_progress', 'subgoals_completed'}:
-                    seqs = [torch.tensor(vv, device=device, dtype=torch.float) for vv in v if len(vv) > 0]
-                    if seqs:
-                        pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
-                        feat[k] = pad_seq
-                    else:
-                        feat[k] = torch.tensor([], device=device)
-
-                elif k in {'action_high', 'action_high_order'}:
-                    seqs = [torch.tensor(vv, device=device, dtype=torch.long) for vv in v if len(vv) > 0]
-                    if seqs:
-                        pad_seq = pad_sequence(seqs, batch_first=True,
-                                               padding_value=self.vocab['action_high'].word2index('<<pad>>'))
-                        feat[k] = pad_seq
-                    else:
-                        feat[k] = torch.tensor([], device=device)
-
-                elif k in {'objnav'}:
-                    if v and any(len(vv) > 0 for vv in v):
-                        seqs = [vvv for vv in v for vvv in vv]
-                        feat[k] = torch.tensor(seqs, device=device, dtype=torch.long)
-                    else:
-                        feat[k] = torch.tensor([], device=device, dtype=torch.long)
-
-                else:
-                    # 默认处理
-                    seqs = [torch.tensor(vv, device=device, dtype=torch.float if ('frames' in k) else torch.long) for vv
-                            in v if len(vv) > 0]
-                    if seqs:
-                        pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
-                        feat[k] = pad_seq
-                    else:
-                        feat[k] = torch.tensor([], device=device)
-
-            except Exception as e:
-                print(f"Error processing feature {k}: {e}")
-                feat[k] = torch.tensor([], device=device)
-
-        return feat
 
     def save_checkpoint(self, epoch, batch_count, optimizer, dout_path):
         '''
@@ -616,6 +395,9 @@ class Module(nn.Module):
         return accuracy, final_loss
 
     def featurize(self, batch):
+        raise NotImplementedError()
+
+    def streaming_featurize(self, data_stream, batch_size):
         raise NotImplementedError()
 
     def forward(self, feat, max_decode=100):
