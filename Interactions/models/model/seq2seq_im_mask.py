@@ -723,10 +723,10 @@ class Module(Base):
                 h, v = 0.0, 0.0
 
             orientation = torch.cat([
-                torch.cos(torch.ones(1) * h),
-                torch.sin(torch.ones(1) * h),
-                torch.cos(torch.ones(1) * v),
-                torch.sin(torch.ones(1) * v),
+                torch.cos(torch.ones(1, device=device) * h),
+                torch.sin(torch.ones(1, device=device) * h),
+                torch.cos(torch.ones(1, device=device) * v),
+                torch.sin(torch.ones(1, device=device) * v),
             ]).unsqueeze(-1).unsqueeze(-1).repeat(1, 7, 7)
 
             return orientation
@@ -742,7 +742,7 @@ class Module(Base):
 
         for view_key, direction in orientation_mapping.items():
             if view_key not in feat_one:
-                feat_one[view_key] = torch.empty(0)
+                feat_one[view_key] = torch.empty(0, device=device)
             view_tensor = feat_one[view_key]
             orientation_tensor = get_orientation(direction, device).repeat(len(view_tensor), 1, 1, 1)
             feat_one[view_key] = torch.cat([view_tensor, orientation_tensor], dim=1)
