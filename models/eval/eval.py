@@ -222,6 +222,27 @@ class Eval(object):
 
         # save
         self.save_results()
+    @classmethod
+    def spawn_threads_streaming(self):
+        '''
+        spawn multiple threads to run eval in parallel
+        '''
+        task_queue = self.queue_tasks()
+
+        # start threads
+        threads = []
+        lock = self.manager.Lock()
+        for n in range(self.args.num_threads):
+            thread = mp.Process(target=self.run_streaming, args=(self.model, self.resnet, task_queue, self.args, lock,
+                                                       self.successes, self.failures, self.results))
+            thread.start()
+            threads.append(thread)
+
+        for t in threads:
+            t.join()
+
+        # save
+        self.save_results()
 
     @classmethod
     def setup_scene(cls, env, traj_data, r_idx, args, reward_type='dense'):

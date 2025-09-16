@@ -457,7 +457,7 @@ class Module(nn.Module):
         # 'swapColor': swapColor
         for data_item in data_stream:
             ex = data_item['ex']
-            i = get_task_and_ann_id(ex)
+            i = self.get_task_and_ann_id(ex)
 
             debug[i] = {
                 'lang_goal': ex['turk_annotations']['anns'][ex['ann']['repeat_idx']]['task_desc'],

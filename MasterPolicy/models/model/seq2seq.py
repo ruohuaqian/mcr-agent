@@ -280,7 +280,7 @@ class Module(nn.Module):
             else:
                 task_path = task_info
                 repeat_idx = 0
-                swapColor = false
+                swapColor = False
 
             # 数据增强：7种swapColor变体
             task_data = self.load_streaming_task(task_path, repeat_idx, swapColor)
@@ -454,7 +454,7 @@ class Module(nn.Module):
         # 'swapColor': swapColor
         for data_item in data_stream:
             ex = data_item['ex']
-            i = get_task_and_ann_id(ex)
+            i = self.get_task_and_ann_id(ex)
 
             debug[i] = {
                 'lang_goal': ex['turk_annotations']['anns'][ex['ann']['repeat_idx']]['task_desc'],
@@ -486,6 +486,7 @@ class Module(nn.Module):
         with open(json_path) as f:
             data = json.load(f)
         return data
+
 
     def get_task_root(self, ex):
         '''

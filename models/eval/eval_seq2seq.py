@@ -62,8 +62,6 @@ if __name__ == '__main__':
         eval = EvalSubgoals(args, manager)
     else:
     # 替换原有的评估调用
-        eval = StreamingEvalTask.run_streaming(
-            model, resnet, task_queue, args, lock, successes, failures, results
-        )
+        eval = StreamingEvalTask(args, manager)
     # start threads
-    eval.spawn_threads()
+    eval.spawn_threads_streaming()

@@ -249,7 +249,8 @@ class Module(Base):
                 feat[k] = pad_seq
 
         return feat
-    def streaming_featurize(self, data_stream, batch_size, load_mask=True, load_frames=True):
+
+    def streaming_featurize(self, data_stream, batch_size, action_high_order, load_mask=True, load_frames=True):
         '''
         Tensorize and pad batch input - streaming version
         '''
@@ -263,7 +264,7 @@ class Module(Base):
             if data_item is None:
                 continue
             try:
-                feat_one = self._fill_feature_one(data_item, device, load_mask, load_frames)
+                feat_one = self._fill_feature_one(data_item,device, action_high_order, load_mask, load_frames)
                 if feat_one is None:
                     self._keep_empty_in_batch(batch_feat, device)
                 else:
@@ -288,7 +289,7 @@ class Module(Base):
             final_batch_feat = self._tensorize_and_pad(batch_feat, device)
             yield batch, final_batch_feat
 
-    def _fill_feature_one(self, data_item, device, load_mask=True, load_frames=True):
+    def _fill_feature_one(self, data_item, device, action_high_order, load_mask=True, load_frames=True):
         feat_one = dict()
 
         ex = data_item['ex']
@@ -296,7 +297,6 @@ class Module(Base):
 
         try:
             # 辅助特征提取
-            action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
             low_to_high_idx = ex['num']['low_to_high_idx']
             action_high = action_high_order[low_to_high_idx]
 
@@ -491,6 +491,7 @@ class Module(Base):
                 feat[k] = torch.tensor([], device=device)
 
         return feat
+
 
     def serialize_lang_action(self, feat, action_high_order):
         '''
