@@ -556,8 +556,8 @@ class Module(Base):
                         sub_frames_high[sfh] = 1
 
                 # 修复: 检查图像数据维度
-                if len(im_data) >= 3:  # 确保有足够的图像数据
-                    sub_frames = im_data[2][sub_frames_high.nonzero()[0]]
+                if len(im) >= 3:  # 确保有足够的图像数据
+                    sub_frames = im[2][sub_frames_high.nonzero()[0]]
                 else:
                     print(f"[WARN] Insufficient image data for task {data_item['task_path']}")
                     return None
