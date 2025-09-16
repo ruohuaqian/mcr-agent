@@ -269,7 +269,7 @@ class Module(Base):
 
         yield feat
 
-    def streaming_featurize(self, data_stream, batch_size, load_mask=True, load_frames=True):
+    def streaming_featurize(self, data_stream, batch_size, action_higher_order=None, object2find=classes, load_mask=True, load_frames=True):
         '''
         Tensorize and pad batch input - streaming version
         '''
@@ -308,14 +308,13 @@ class Module(Base):
             final_batch_feat = self._tensorize_and_pad(batch_feat, device)
             yield batch, final_batch_feat
 
-    def _fill_feature_one(self, data_item, device, load_mask=True, load_frames=True):
+    def _fill_feature_one(self, data_item, device, action_higher_order=None, object2find=classes, load_mask=True, load_frames=True):
         feat_one = dict()
 
         ex = data_item['ex']
         im = data_item['im']
         try:
-            # 辅助特征提取
-            action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
+            action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']]) if action_higher_order is None else action_higher_order
             low_to_high_idx = ex['num']['low_to_high_idx']
             action_high = action_high_order[low_to_high_idx]
             feat_one['action_high'] = action_high
@@ -412,7 +411,7 @@ class Module(Base):
                         label = a['api_action']['receptacleObjectId'].split('|')
                     else:
                         label = a['api_action']['objectId'].split('|')
-                    indices.append(classes.index(label[4].split('_')[0] if len(label) >= 5 else label[0]))
+                    indices.append(object2find.index(label[4].split('_')[0] if len(label) >= 5 else label[0]))
                     # obj_high_indices.append(high_idx)
 
                     if a['high_idx'] == (high_idx + 1):
