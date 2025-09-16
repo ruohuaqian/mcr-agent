@@ -172,6 +172,7 @@ def printing_log(*args):
     filename = 'new_logs/loop_break_0.3_thresh_val_unseen_latest_logs.txt'
     # flag = True
 
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
     with open(filename, 'a') as f:
         for ar in new_args:
             f.write(f'{ar}\n')
