@@ -10,6 +10,8 @@ from tensorboardX import SummaryWriter
 from tqdm import trange
 from PCC.models.model import constants
 from huggingface_hub import login
+from huggingface_hub import hf_hub_url
+
 classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp', 'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
 import torch.nn.functional as F
 

@@ -10,6 +10,7 @@ from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_se
 from PCC.models.model.seq2seq import Module as Base
 from PCC.models.utils.metric import compute_f1, compute_exact
 from gen.utils.image_util import decompress_mask
+from huggingface_hub import hf_hub_url
 
 from PIL import Image
 
