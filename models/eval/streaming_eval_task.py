@@ -803,23 +803,23 @@ class StreamingEvalTask(Eval):
         return res
 
 
-def create_stats(self):
-    '''
-    storage for success, failure, and results info
-    '''
-    self.successes, self.failures = self.manager.list(), self.manager.list()
-    self.results = self.manager.dict()
+    def create_stats(self):
+        '''
+        storage for success, failure, and results info
+        '''
+        self.successes, self.failures = self.manager.list(), self.manager.list()
+        self.results = self.manager.dict()
 
 
-def save_results(self):
-    results = {'successes': list(self.successes),
-               'failures': list(self.failures),
-               'results': dict(self.results)}
+    def save_results(self):
+        results = {'successes': list(self.successes),
+                   'failures': list(self.failures),
+                   'results': dict(self.results)}
 
-    save_path = os.path.dirname(self.args.nav_model_path)
-    save_path = os.path.join(save_path, (os.path.basename(self.args.nav_model_path)).split('.')[0] + '_man_' +
-                             (os.path.basename(self.args.pickup_model_path)).split('.')[
-                                 0] + '_' + self.args.eval_split + '_' + datetime.now().strftime(
-        "%Y%m%d_%H%M%S_%f") + '.json')
-    with open(save_path, 'w') as r:
-        json.dump(results, r, indent=4, sort_keys=True)
+        save_path = os.path.dirname(self.args.nav_model_path)
+        save_path = os.path.join(save_path, (os.path.basename(self.args.nav_model_path)).split('.')[0] + '_man_' +
+                                 (os.path.basename(self.args.pickup_model_path)).split('.')[
+                                     0] + '_' + self.args.eval_split + '_' + datetime.now().strftime(
+            "%Y%m%d_%H%M%S_%f") + '.json')
+        with open(save_path, 'w') as r:
+            json.dump(results, r, indent=4, sort_keys=True)
