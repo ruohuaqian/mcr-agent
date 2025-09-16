@@ -375,7 +375,7 @@ class StreamingEvalTask(Eval):
         return False, t, fails, total_actions, total_frames
 
     @classmethod
-    def evaluate(cls, env, model, r_idx, resnet, data, args, lock, successes, failures, results, task):
+    def evaluate_streaming(cls, env, model, r_idx, resnet, data, args, lock, successes, failures, results, task):
 
         import copy
 
