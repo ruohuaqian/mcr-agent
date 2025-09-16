@@ -196,7 +196,7 @@ class StreamingEvalTask(Eval):
                 continue
 
             try:
-                data = model['nav'].load_streaming_data(task['task'], task['repeat_idx'], False)
+                data = model['nav'].load_streaming_task(task['task'], task['repeat_idx'], False)
                 printing_log("Evaluating: %s" % (task['task']))
                 printing_log("No. of trajectories left: %d" % (task_queue.qsize()))
                 r_idx = task['repeat_idx']
