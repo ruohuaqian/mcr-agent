@@ -1,7 +1,7 @@
 export PYTHONPATH="${MCR_ROOT}:${MCR_ROOT}/models:${PYTHONPATH}"
 
 cd "${MCR_ROOT}/models"
-python models/eval/eval_seq2seq.py   \
+python eval/eval_seq2seq.py   \
 		--nav_model_path /content/drive/MyDrive/mcr-agent/exp/MasterPolicy/latest.pth  \
 		--pickup_model_path /content/drive/MyDrive/mcr-agent/exp/Interactions/PickupObject/latest.pth  \
 		--put_model_path /content/drive/MyDrive/mcr-agent/exp/Interactions/PutObject/latest.pth  \
