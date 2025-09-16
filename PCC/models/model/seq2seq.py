@@ -11,6 +11,7 @@ from tqdm import trange
 from PCC.models.model import constants
 from huggingface_hub import login
 from huggingface_hub import hf_hub_url
+import requests
 
 classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp', 'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
 import torch.nn.functional as F
@@ -269,7 +270,7 @@ class Module(nn.Module):
             else:
                 task_path = task_info
                 repeat_idx = 0
-                swapColor = false
+                swapColor = False
 
             # 数据增强：7种swapColor变体
             task_data = self.load_streaming_task(task_path, repeat_idx, swapColor)
