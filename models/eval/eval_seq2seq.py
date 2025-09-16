@@ -56,7 +56,7 @@ if __name__ == '__main__':
     # parse arguments
     args = parser.parse_args()
         # eval = EvalTask(args, manager)
-    from models.eval.stream_eval_task import StreamingEvalTask
+    from models.eval.streaming_eval_task import StreamingEvalTask
     # eval mode
     if args.subgoals:
         eval = EvalSubgoals(args, manager)
