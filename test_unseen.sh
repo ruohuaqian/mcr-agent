@@ -13,7 +13,7 @@ python eval/eval_seq2seq.py   \
 		--object_model_path /content/drive/MyDrive/mcr-agent/exp/OEM/latest.pth  \
 		--subgoal_model_path /content/drive/MyDrive/mcr-agent/exp/PCC/latest.pth  \
 		--eval_split	valid_unseen                          \
-		--huggingface_id		byeonghwikim/abp dataset       \
+		--huggingface_id		byeonghwikim/abp_dataset       \
 		--gpu                                               \
 		--max_step	80                                 \
 		--max_fail	10                                  \
