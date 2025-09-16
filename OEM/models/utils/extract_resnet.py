@@ -1,7 +1,7 @@
 import torch
 import os
 from PIL import Image
-from models.nn.resnet import Resnet
+from OEM.models.nn.resnet import Resnet
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
 import numpy as np
