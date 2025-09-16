@@ -222,7 +222,7 @@ class Eval(object):
 
         # save
         self.save_results()
-    @classmethod
+
     def spawn_threads_streaming(self):
         '''
         spawn multiple threads to run eval in parallel
