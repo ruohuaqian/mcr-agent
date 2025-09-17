@@ -10,7 +10,6 @@ import gen.utils.image_util as image_util
 from gen.utils import game_util
 from gen.utils.game_util import get_objects_of_type, get_obj_of_type_closest_to_obj
 from pyvirtualdisplay import Display
-from ai2thor.util import Vector3
 
 DEFAULT_RENDER_SETTINGS = {'renderImage': True,
                            'renderDepthImage': False,
@@ -304,7 +303,6 @@ class ThorEnv(Controller):
             events.append(event)
         return events
 
-
     def smooth_rotate(self, action, render_settings=None):
         """
         Smoother RotateLeft and RotateRight compatible with AI2-THOR 4.3.0
@@ -315,34 +313,30 @@ class ThorEnv(Controller):
         event = self.last_event
         horizon = np.round(event.metadata['agent']['cameraHorizon'], 4)
         position = event.metadata['agent']['position']
-        rotation = event.metadata['agent']['rotation']
-        start_rotation = rotation['y']
+        rotation_y = np.round(event.metadata['agent']['rotation']['y'], 4)
 
         if action['action'] == 'RotateLeft':
-            end_rotation = start_rotation - 90
+            end_rotation_y = rotation_y - 90
         else:
-            end_rotation = start_rotation + 90
+            end_rotation_y = rotation_y + 90
 
         events = []
 
         for xx in np.arange(0.1, 1.0001, 0.1):
-            current_y = np.round(start_rotation * (1 - xx) + end_rotation * xx, 3)
+            current_y = np.round(rotation_y * (1 - xx) + end_rotation_y * xx, 3)
             teleport_action = {
                 'action': 'TeleportFull',
                 'x': position['x'],
                 'y': position['y'],
                 'z': position['z'],
-                'rotation': Vector3(0, current_y, 0),
+                'rotation': {'x': 0.0, 'y': current_y, 'z': 0.0},
                 'horizon': horizon,
                 'standing': True,
-                'forceAction': True
+                'forceAction': True,
+                **render_settings
             }
 
-            # 传 render_settings 作为额外参数
-            event = super().step({**teleport_action, **{
-                k: render_settings[k] for k in render_settings
-            }})
-
+            event = super().step(teleport_action)
             if event.metadata['lastActionSuccess']:
                 events.append(event)
 
@@ -371,24 +365,18 @@ class ThorEnv(Controller):
                 'x': position['x'],
                 'y': position['y'],
                 'z': position['z'],
-                'rotation': Vector3(0, rotation_y, 0),
+                'rotation': {'x': 0.0, 'y': rotation_y, 'z': 0.0},
                 'horizon': current_horizon,
                 'standing': True,
-                'forceAction': True
+                'forceAction': True,
+                **render_settings
             }
 
-            # 合并 render_settings
-            teleport_action = {**teleport_action, **{
-                k: render_settings[k] for k in render_settings
-            }}
-
             event = super().step(teleport_action)
-
             if event.metadata['lastActionSuccess']:
                 events.append(event)
 
         return events
-
 
     def look_angle(self, angle, render_settings=None):
         """
@@ -408,21 +396,15 @@ class ThorEnv(Controller):
             'x': position['x'],
             'y': position['y'],
             'z': position['z'],
-            'rotation': Vector3(0, rotation_y, 0),
+            'rotation': {'x': 0.0, 'y': rotation_y, 'z': 0.0},
             'horizon': np.round(end_horizon, 3),
             'standing': True,
-            'forceAction': True
+            'forceAction': True,
+            **render_settings
         }
-
-        # 合并 render_settings
-        teleport_action = {**teleport_action, **{
-            k: render_settings[k] for k in render_settings
-        }}
 
         event = super().step(teleport_action)
         return event
-
-    from ai2thor.util import Vector3
 
     def rotate_angle(self, angle, render_settings=None):
         """
@@ -442,16 +424,12 @@ class ThorEnv(Controller):
             'x': position['x'],
             'y': position['y'],
             'z': position['z'],
-            'rotation': Vector3(0, end_rotation_y, 0),
+            'rotation': {'x': 0.0, 'y': end_rotation_y, 'z': 0.0},
             'horizon': horizon,
             'standing': True,
-            'forceAction': True
+            'forceAction': True,
+            **render_settings
         }
-
-        # 合并 render_settings
-        teleport_action = {**teleport_action, **{
-            k: render_settings[k] for k in render_settings
-        }}
 
         event = super().step(teleport_action)
         return event
