@@ -135,7 +135,11 @@ class DynamicConvLayer(nn.Module):
         dynamic_filters = torch.stack([df1, df2, df3]).transpose(0, 1)
         dynamic_filters = self.filter_activation(dynamic_filters)
         dynamic_filters = F.normalize(dynamic_filters, p=2, dim=-1)
-
+        if dynamic_filters.size(-1) != frame.size(1):
+            # simple mean pooling: 把 extra 维度平均掉，得到 frame.size(1) 维
+            dyn = dynamic_filters.transpose(-1, -2)  # (B, D_dyn, p)
+            dyn = F.adaptive_avg_pool1d(dyn, frame.size(1))  # (B, frame.size(1), p)
+            dynamic_filters = dyn.transpose(-1, -2)  # (B, p, frame.size(1))
         """ attention map """
         frame = frame.view(frame.size(0), frame.size(1), -1)
         scale_2 = np.sqrt(frame.shape[1]) #torch.sqrt(torch.tensor(frame.shape[1], dtype=torch.double))
