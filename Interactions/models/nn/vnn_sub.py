@@ -136,6 +136,9 @@ class DynamicConvLayer(nn.Module):
         dynamic_filters = torch.stack([df1, df2, df3]).transpose(0, 1)
         dynamic_filters = self.filter_activation(dynamic_filters)
         dynamic_filters = F.normalize(dynamic_filters, p=2, dim=-1)
+        if dynamic_filters.size(-1) != frame.size(1):
+            linear_proj = torch.nn.Linear(dynamic_filters.size(-1), frame.size(1)).to(dynamic_filters.device)
+            dynamic_filters = linear_proj(dynamic_filters)
 
         """ attention map """
         frame = frame.view(frame.size(0), frame.size(1), -1)

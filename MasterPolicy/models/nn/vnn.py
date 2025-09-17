@@ -138,12 +138,9 @@ class DynamicConvLayer(nn.Module):
         frame = frame.view(frame.size(0), frame.size(1), -1)
         scale_2 = np.sqrt(frame.shape[1])
 
-        # if dim(dynamic_filters) > frame 的通道数，用平均池化对齐
         if dynamic_filters.size(-1) != frame.size(1):
-            # simple mean pooling: 把 extra 维度平均掉，得到 frame.size(1) 维
-            dyn = dynamic_filters.transpose(-1, -2)  # (B, D_dyn, p)
-            dyn = F.adaptive_avg_pool1d(dyn, frame.size(1))  # (B, frame.size(1), p)
-            dynamic_filters = dyn.transpose(-1, -2)  # (B, p, frame.size(1))
+            linear_proj = torch.nn.Linear(dynamic_filters.size(-1), frame.size(1)).to(dynamic_filters.device)
+            dynamic_filters = linear_proj(dynamic_filters)
 
         attention_map = torch.bmm(frame.transpose(1, 2), dynamic_filters.transpose(-1, -2)) / scale_2
         attention_map = attention_map.reshape(attention_map.size(0), -1)
