@@ -1,4 +1,4 @@
-import json
+import json, os
 import argparse
 import numpy as np
 from PIL import Image
@@ -59,11 +59,11 @@ def get_panoramic_views(env):
     env.step({
         "action": "TeleportFull",
         "horizon": horizon,
-        "rotateOnTeleport": True,
         "rotation": (rotation['y'] + 90.0) % 360,
         "x": position['x'],
         "y": position['y'],
         "z": position['z'],
+        "standing": True,
         "forceAction": True,
     })
     curr_image_right = Image.fromarray(np.uint8(env.last_event.frame))

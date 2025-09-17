@@ -297,24 +297,25 @@ class Module(Base):
 
         try:
             # 辅助特征提取
-            low_to_high_idx = ex['num']['low_to_high_idx']
-            action_high = action_high_order[low_to_high_idx]
+            if not self.test_mode:
+                low_to_high_idx = ex['num']['low_to_high_idx']
+                action_high = action_high_order[low_to_high_idx]
 
-            feat_one['action_high'] = action_high
-            feat_one['action_high_order'] = action_high_order
+                feat_one['action_high'] = action_high
+                feat_one['action_high_order'] = action_high_order
 
-            # GotoLocation 验证
-            val_action_high = (
-                    action_high == self.vocab['action_high'].word2index('GotoLocation', train=False)).astype(
-                np.int64)
+                # GotoLocation 验证
+                val_action_high = (
+                        action_high == self.vocab['action_high'].word2index('GotoLocation', train=False)).astype(
+                    np.int64)
 
-            v = 0
-            while v < (len(val_action_high) - 1):
-                if (val_action_high[v] - val_action_high[v + 1]) == 1:
-                    val_action_high[v + 1] = 1
+                v = 0
+                while v < (len(val_action_high) - 1):
+                    if (val_action_high[v] - val_action_high[v + 1]) == 1:
+                        val_action_high[v + 1] = 1
+                        v += 1
                     v += 1
-                v += 1
-            val_action_high[-1] = 1
+                val_action_high[-1] = 1
 
             # 序列化语言动作
             self.serialize_lang_action(ex, action_high_order)
@@ -331,20 +332,20 @@ class Module(Base):
             alow = []
             alow_manip = []
             obj_high_indices = []
+            if not self.test_mode:
+                for ia, a in enumerate(ex['num']['action_low']):
+                    if val_action_high[ia] == 1 and a['action'] in self.vocab['action_low'].word2index(
+                            ['<<pad>>', '<<seg>>', '<<stop>>', 'LookDown_15', 'LookUp_15', 'RotateLeft_90',
+                             'RotateRight_90', 'MoveAhead_25'], train=False):
+                        alow.append(a['action'])
+                    elif val_action_high[ia] == 1:
+                        alow.append(self.vocab['action_low'].word2index('Manipulate', train=False))
 
-            for ia, a in enumerate(ex['num']['action_low']):
-                if val_action_high[ia] == 1 and a['action'] in self.vocab['action_low'].word2index(
-                        ['<<pad>>', '<<seg>>', '<<stop>>', 'LookDown_15', 'LookUp_15', 'RotateLeft_90',
-                         'RotateRight_90', 'MoveAhead_25'], train=False):
-                    alow.append(a['action'])
-                elif val_action_high[ia] == 1:
-                    alow.append(self.vocab['action_low'].word2index('Manipulate', train=False))
-
-                if not (a['action'] in self.vocab['action_low'].word2index(
-                        ['<<pad>>', '<<seg>>', '<<stop>>', 'LookDown_15', 'LookUp_15', 'RotateLeft_90',
-                         'RotateRight_90', 'MoveAhead_25'], train=False)):
-                    alow_manip.append(a['action'])
-                    obj_high_indices.append(low_to_high_idx[ia])
+                    if not (a['action'] in self.vocab['action_low'].word2index(
+                            ['<<pad>>', '<<seg>>', '<<stop>>', 'LookDown_15', 'LookUp_15', 'RotateLeft_90',
+                             'RotateRight_90', 'MoveAhead_25'], train=False)):
+                        alow_manip.append(a['action'])
+                        obj_high_indices.append(low_to_high_idx[ia])
 
             feat_one['action_low'] = alow
             feat_one['action_low_manip'] = alow_manip

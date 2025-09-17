@@ -18,4 +18,5 @@ python eval/eval_seq2seq.py   \
 		--gpu                                               \
 		--max_step	80                                 \
 		--max_fail	10                                  \
+		--reward_config ${MCR_ROOT}/models/config/rewards.json \
 		--num_threads 4;
