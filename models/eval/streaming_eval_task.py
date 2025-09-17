@@ -140,7 +140,7 @@ def get_panoramic_views(env):
 
 class StreamingEvalTask(Eval):
     _current_split = None
-    cls._current_task_order = 0
+    _current_task_order = 0
 
     @classmethod
     def set_split(cls, split):
