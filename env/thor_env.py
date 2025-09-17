@@ -160,15 +160,22 @@ class ThorEnv(Controller):
         兼容：
           - step("RotateLeft", rotation=90)
           - step({"action": "RotateLeft", "rotation": 90})
-        并仅对我们关心的导航/俯仰做平滑或别名处理；其余一律透传 super().
         """
         # 统一解析成 (act: str|None, params: dict)
         if isinstance(action, dict):
             act = action.get("action")
             params = {k: v for k, v in action.items() if k != "action"}
         else:
-            act = action  # str 或 None（AI2-THOR 某些内部调用可能给 None）
+            act = action  # str or None
             params = dict(kwargs)
+        # drop all the deprecated_params
+        if act == "TeleportFull":
+            deprecated_params = ['rotateOnTeleport', 'allowTeleportRotation']
+            for param in deprecated_params:
+                if param in params:
+                    del params[param]
+            if 'standing' not in params:
+                params['standing'] = True  #reach the new required param
 
         # 对于初始化/内部查询（如 "GetScenesInBuild"）或 act 为 None：直接透传
         if not isinstance(act, str):
