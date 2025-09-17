@@ -417,8 +417,11 @@ class Module(Base):
                         label = a['api_action']['receptacleObjectId'].split('|')
                     else:
                         label = a['api_action']['objectId'].split('|')
-                    indices.append(object2find.index(label[4].split('_')[0] if len(label) >= 5 else label[0]))
-                    # obj_high_indices.append(high_idx)
+                    object = label[4].split('_')[0] if len(label) >= 5 else label[0]
+                    if object in object2find:
+                        indices.append(object2find.index(object))
+                    else:
+                        indices.append(-1)
 
                     if a['high_idx'] == (high_idx + 1):
                         # if obj_list[-1] != self.vocab['objnav'].word2index((label[4].split('_')[0] if len(label) >= 5 else label[0]).lower(), train=False):
