@@ -1,4 +1,5 @@
 import os
+import io
 import random
 import json
 import torch
@@ -277,7 +278,7 @@ class Module(nn.Module):
             if task_data is not None:
                 yield task_data
 
-    def load_streaming_task(self, task_path, repeat_idx, swapColor):
+    def load_streaming_task(self, task_path, repeat_idx, swapColor, split='train'):
         '''
         流式加载单个任务数据
         '''
@@ -302,11 +303,11 @@ class Module(nn.Module):
 
             # 加载图像特征
             if swapColor == 0:
-                pt_filename = f"train/{task_path}/{self.feat_pt}"
+                pt_filename = f"{split}/{task_path}/{self.feat_pt}"
             elif swapColor in [1, 2]:
-                pt_filename = f"train/{task_path}/feat_conv_colorSwap{swapColor}_panoramic.pt"
+                pt_filename = f"{split}/{task_path}/feat_conv_colorSwap{swapColor}_panoramic.pt"
             else:
-                pt_filename = f"train/{task_path}/feat_conv_onlyAutoAug{swapColor - 2}_panoramic.pt"
+                pt_filename = f"{split}/{task_path}/feat_conv_onlyAutoAug{swapColor - 2}_panoramic.pt"
 
             pt_url = hf_hub_url(
                 repo_id=self.args.huggingface_id,
