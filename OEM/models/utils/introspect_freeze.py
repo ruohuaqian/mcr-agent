@@ -8,7 +8,7 @@ def topk(d, k=20):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", required=True, help="e.g., OEM.models.model.seq2seq_im_mask_obj")
+    ap.add_argument("--model", required=True, default="OEM.models.model.seq2seq_im_mask_obj", help="model full name")
     ap.add_argument("--ckpt", required=True, help="checkpoint path")
     ap.add_argument("--levels", type=int, default=1, help="prefix depth (1 or 2)")
     args = ap.parse_args()

@@ -157,15 +157,15 @@ class Module(nn.Module):
 
         # splits
         train_list = splits['train']
-        # valid_seen = splits['valid_seen']
-        # valid_unseen = splits['valid_unseen']
+        valid_seen = splits['valid_seen']
+        valid_unseen = splits['valid_unseen']
 
         train = [(s, False) for s in train_list]
         train = train + [(s, 1) for s in train_list] + [(s, 2) for s in train_list]
         train = train + [(s, 3) for s in train_list] + [(s, 4) for s in train_list] + [(s, 5) for s in train_list] + [
             (s, 6) for s in train_list]
-        # valid_seen = [(s, False) for s in valid_seen]
-        # valid_unseen = [(s, False) for s in valid_unseen]
+        valid_seen = [(s, False) for s in valid_seen]
+        valid_unseen = [(s, False) for s in valid_unseen]
 
         # debugging: chose a small fraction of the dataset
         if self.args.dataset_fraction > 0:
@@ -178,8 +178,8 @@ class Module(nn.Module):
         # debugging: use to check if training loop works without waiting for full epoch
         if self.args.fast_epoch:
             train = train[-16:]
-            # valid_seen = valid_seen[:1]
-            # valid_unseen = valid_unseen[:1]
+            valid_seen = valid_seen[:1]
+            valid_unseen = valid_unseen[:1]
 
         # initialize summary writer for tensorboardX
         self.summary_writer = SummaryWriter(log_dir=args.dout)
@@ -206,6 +206,8 @@ class Module(nn.Module):
             random.shuffle(train)
             c_st = 0
             epoch_train_stream = self.create_streaming_dataset(train)
+            valid_seen_stream = self.create_streaming_dataset(valid_seen)
+            valid_unseen_stream = self.create_streaming_dataset(valid_unseen)
             # 使用流式迭代器
             for batch, feat in self.streaming_iterate(epoch_train_stream, args.batch):
                 c_st += 1
