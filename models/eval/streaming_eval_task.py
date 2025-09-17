@@ -430,7 +430,7 @@ class StreamingEvalTask(Eval):
 
         printing_log("changes", [model['nav'].vocab['action_high'].index2word(list(pred_subgoal.cpu().numpy()))])
         # exit()
-        mix_feat_obj_stream = model['object'].streaming_featurize(cls.wrap_to_stream(data), 1, pred_subgoal.cpu().numpy(),
+        mix_feat_obj_stream = model['object'].streaming_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1, pred_subgoal.cpu().numpy(),
                                              load_mask=True)
         feat_obj = cls.unwrap_to_feat(mix_feat_obj_stream)
         out_obj = model['object'].forward(feat_obj)
@@ -439,7 +439,7 @@ class StreamingEvalTask(Eval):
         objects2find = [classes[o.item()] for o in pred_obj]
 
         # extract language features
-        mix_feat_stream = model['nav'].streaming_featurize(cls.wrap_to_stream(data), 1, pred_subgoal.cpu().numpy(), objects2find,
+        mix_feat_stream = model['nav'].streaming_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1, pred_subgoal.cpu().numpy(), objects2find,
                                       load_mask=True)
         feat = cls.unwrap_to_feat(mix_feat_stream)
         # goal instr
