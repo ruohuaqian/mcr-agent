@@ -6,7 +6,9 @@ score_table = -np.ones((NUM_EPOCHS,8))
 
 for i in range(NUM_EPOCHS):
     for s in ['valid_seen', 'valid_unseen', 'test_seen', 'test_unseen']:
-        fname = 'new_logs/loop_break_0.3_thresh_{}_{}_logs.txt'.format(s, i)
+        os.path.dirname(os.path.abspath(__file__))
+        fname = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             '/models/new_logs/loop_break_0.3_thresh_{}_{}_logs.txt'.format(s, i))
         if not os.path.exists(fname):
             continue
         with open(fname, 'r') as f:

@@ -56,7 +56,7 @@ for subgoal in "${subgoals[@]}"; do
   for i in $(seq 0 20); do
     CKPT="$DOUT/${subgoal}/net_epoch_${i}.pth"
     if [[ ! -f "$CKPT" ]]; then
-      echo "[SKIP] 不存在: $CKPT"
+      echo "[SKIP] not existed: $CKPT"
       continue
     fi
 

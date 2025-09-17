@@ -50,7 +50,7 @@ echo "[INFO] CWD=$(pwd)"
 for i in $(seq 0 20); do
   CKPT="$DOUT/net_epoch_${i}.pth"
   if [[ ! -f "$CKPT" ]]; then
-    echo "[SKIP] 不存在: $CKPT"
+    echo "[SKIP] not existed: $CKPT"
     continue
   fi
 
