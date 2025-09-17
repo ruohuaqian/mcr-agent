@@ -311,10 +311,15 @@ class Module(Base):
     def _fill_feature_one(self, data_item, device, action_higher_order=None, object2find=classes, load_mask=True, load_frames=True):
         feat_one = dict()
 
+
         ex = data_item['ex']
         im = data_item['im']
         try:
-            action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']]) if action_higher_order is None else action_higher_order
+            if action_higher_order is None:
+                action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
+            else:
+                action_high_order = action_higher_order
+
             low_to_high_idx = ex['num']['low_to_high_idx']
             action_high = action_high_order[low_to_high_idx]
             feat_one['action_high'] = action_high

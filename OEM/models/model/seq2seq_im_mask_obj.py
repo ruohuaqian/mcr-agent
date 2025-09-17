@@ -294,7 +294,7 @@ class Module(Base):
 
         ex = data_item['ex']
         im = data_item['im']
-
+        val_action_high = np.array([], dtype=np.int64)
         try:
             # 辅助特征提取
             if not self.test_mode:
@@ -316,6 +316,7 @@ class Module(Base):
                         v += 1
                     v += 1
                 val_action_high[-1] = 1
+
 
             # 序列化语言动作
             self.serialize_lang_action(ex, action_high_order)
@@ -372,7 +373,7 @@ class Module(Base):
             # 对象导航和掩码
             obj_list = [0]  # 使用0代替 '<<nav>>'
             high_idx = 0
-            if load_mask:
+            if load_mask and not self.test_mode:
                 indices = []
 
                 for a in ex['plan']['low_actions']:
