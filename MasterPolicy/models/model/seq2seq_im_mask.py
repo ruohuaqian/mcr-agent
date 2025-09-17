@@ -494,6 +494,8 @@ class Module(Base):
                 # language embedding and padding
                 seqs = [torch.tensor(vv, device=device) for vv in v]
                 pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+                if pad_seq.dtype != torch.long:
+                    pad_seq = pad_seq.long()
                 seq_lengths = np.array(list(map(len, v)))
                 embed_seq = self.emb_word(pad_seq)
                 packed_input = pack_padded_sequence(embed_seq, seq_lengths, batch_first=True, enforce_sorted=False)
