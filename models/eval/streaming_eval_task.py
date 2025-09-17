@@ -182,11 +182,11 @@ class StreamingEvalTask(Eval):
 
             try:
                 data = model['nav'].load_streaming_task(task['task'], task['repeat_idx'], False, args.eval_split)
-                printing_log("Evaluating: %s" % (task['task']))
-                printing_log("No. of trajectories left: %d" % (task_queue.qsize()))
+                cls.printing_log("Evaluating: %s" % (task['task']))
+                cls.printing_log("No. of trajectories left: %d" % (task_queue.qsize()))
                 r_idx = task['repeat_idx']
-                printing_log("Evaluating: %s" % (data['ex']['root']))
-                printing_log("No. of trajectories left: %d" % (task_queue.qsize()))
+                cls.printing_log("Evaluating: %s" % (data['ex']['root']))
+                cls.printing_log("No. of trajectories left: %d" % (task_queue.qsize()))
                 cls.evaluate_streaming(env, model, r_idx, resnet, data, args, lock, successes, failures, results,
                                        task)
 
