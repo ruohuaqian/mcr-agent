@@ -170,11 +170,12 @@ class StreamingEvalTask(Eval):
         env = ThorEnv(use_virtual_display=True)
 
         while True:
-            if task_queue.qsize() == 0:
-                break
+            with lock:
+                if task_queue.qsize() == 0:
+                    break
 
-            task = task_queue.get()
-            cls._current_task_order += 1
+                task = task_queue.get()
+                cls._current_task_order += 1
 
             if os.path.exists(os.path.join('logs/success', task['task'], str(task['repeat_idx']))) \
                     or os.path.exists(os.path.join('logs/failure', task['task'], str(task['repeat_idx']))):
