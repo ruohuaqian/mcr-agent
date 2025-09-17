@@ -283,7 +283,7 @@ class Module(Base):
             if data_item is None:
                 continue
             try:
-                feat_one = self._fill_feature_one(data_item, device, load_mask, load_frames)
+                feat_one = self._fill_feature_one(data_item, device, action_higher_order, object2find, load_mask, load_frames)
                 if feat_one is None:
                     self._keep_empty_in_batch(batch_feat, device)
                 else:
