@@ -388,62 +388,71 @@ class ThorEnv(Controller):
                 events.append(event)
 
         return events
+
+
     def look_angle(self, angle, render_settings=None):
-        '''
-        look at a specific angle
-        '''
+        """
+        Look at a specific angle (compatible with AI2-THOR 4.3.0)
+        """
         if render_settings is None:
             render_settings = DEFAULT_RENDER_SETTINGS
+
         event = self.last_event
         start_horizon = event.metadata['agent']['cameraHorizon']
-        rotation = np.round(event.metadata['agent']['rotation']['y'], 4)
+        rotation_y = np.round(event.metadata['agent']['rotation']['y'], 4)
         end_horizon = start_horizon + angle
         position = event.metadata['agent']['position']
 
         teleport_action = {
             'action': 'TeleportFull',
-            'rotation': rotation,
             'x': position['x'],
-            'z': position['z'],
             'y': position['y'],
+            'z': position['z'],
+            'rotation': Vector3(0, rotation_y, 0),
             'horizon': np.round(end_horizon, 3),
-            'tempRenderChange': True,
-            'renderNormalsImage': False,
-            'renderImage': render_settings['renderImage'],
-            'renderClassImage': render_settings['renderClassImage'],
-            'renderObjectImage': render_settings['renderObjectImage'],
-            'renderDepthImage': render_settings['renderDepthImage'],
+            'standing': True,
+            'forceAction': True
         }
+
+        # 合并 render_settings
+        teleport_action = {**teleport_action, **{
+            k: render_settings[k] for k in render_settings
+        }}
+
         event = super().step(teleport_action)
         return event
 
+    from ai2thor.util import Vector3
+
     def rotate_angle(self, angle, render_settings=None):
-        '''
-        rotate at a specific angle
-        '''
+        """
+        Rotate agent by a specific angle (AI2-THOR 4.3.0 compatible)
+        """
         if render_settings is None:
             render_settings = DEFAULT_RENDER_SETTINGS
+
         event = self.last_event
         horizon = np.round(event.metadata['agent']['cameraHorizon'], 4)
         position = event.metadata['agent']['position']
-        rotation = event.metadata['agent']['rotation']
-        start_rotation = rotation['y']
-        end_rotation = start_rotation + angle
+        rotation_y = np.round(event.metadata['agent']['rotation']['y'], 4)
+        end_rotation_y = rotation_y + angle
 
         teleport_action = {
             'action': 'TeleportFull',
-            'rotation': np.round(end_rotation, 3),
             'x': position['x'],
-            'z': position['z'],
             'y': position['y'],
+            'z': position['z'],
+            'rotation': Vector3(0, end_rotation_y, 0),
             'horizon': horizon,
-            'tempRenderChange': True,
-            'renderNormalsImage': False,
-            'renderImage': render_settings['renderImage'],
-            'renderClassImage': render_settings['renderClassImage'],
-            'renderObjectImage': render_settings['renderObjectImage'],
-            'renderDepthImage': render_settings['renderDepthImage'],
+            'standing': True,
+            'forceAction': True
         }
+
+        # 合并 render_settings
+        teleport_action = {**teleport_action, **{
+            k: render_settings[k] for k in render_settings
+        }}
+
         event = super().step(teleport_action)
         return event
 
