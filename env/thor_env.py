@@ -333,7 +333,6 @@ class ThorEnv(Controller):
                 'horizon': horizon,
                 'standing': True,
                 'forceAction': True,
-                **render_settings
             }
 
             event = super().step(teleport_action)
@@ -369,7 +368,6 @@ class ThorEnv(Controller):
                 'horizon': current_horizon,
                 'standing': True,
                 'forceAction': True,
-                **render_settings
             }
 
             event = super().step(teleport_action)
@@ -400,7 +398,6 @@ class ThorEnv(Controller):
             'horizon': np.round(end_horizon, 3),
             'standing': True,
             'forceAction': True,
-            **render_settings
         }
 
         event = super().step(teleport_action)
@@ -428,7 +425,6 @@ class ThorEnv(Controller):
             'horizon': horizon,
             'standing': True,
             'forceAction': True,
-            **render_settings
         }
 
         event = super().step(teleport_action)
