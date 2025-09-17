@@ -10,6 +10,7 @@ import gen.utils.image_util as image_util
 from gen.utils import game_util
 from gen.utils.game_util import get_objects_of_type, get_obj_of_type_closest_to_obj
 from pyvirtualdisplay import Display
+from ai2thor.util import Vector3
 
 DEFAULT_RENDER_SETTINGS = {'renderImage': True,
                            'renderDepthImage': False,
@@ -303,9 +304,10 @@ class ThorEnv(Controller):
             events.append(event)
         return events
 
+
     def smooth_rotate(self, action, render_settings=None):
         """
-        smoother RotateLeft and RotateRight for AI2-THOR 2.1.0
+        Smoother RotateLeft and RotateRight compatible with AI2-THOR 4.3.0
         """
         if render_settings is None:
             render_settings = DEFAULT_RENDER_SETTINGS
@@ -317,79 +319,75 @@ class ThorEnv(Controller):
         start_rotation = rotation['y']
 
         if action['action'] == 'RotateLeft':
-            end_rotation = (start_rotation - 90) % 360
+            end_rotation = start_rotation - 90
         else:
-            end_rotation = (start_rotation + 90) % 360
+            end_rotation = start_rotation + 90
 
         events = []
 
         for xx in np.arange(0.1, 1.0001, 0.1):
-            interp_y = np.round(start_rotation * (1 - xx) + end_rotation * xx, 3)
+            current_y = np.round(start_rotation * (1 - xx) + end_rotation * xx, 3)
             teleport_action = {
                 'action': 'TeleportFull',
-                'position': Vector3(position['x'], position['y'], position['z']),
-                'rotation': Vector3(0, interp_y, 0),
+                'x': position['x'],
+                'y': position['y'],
+                'z': position['z'],
+                'rotation': Vector3(0, current_y, 0),
                 'horizon': horizon,
                 'standing': True,
                 'forceAction': True
             }
 
-            # 对 render 设置单独处理，如果需要图像渲染
-            if xx < 1:
-                render_kwargs = {k: render_settings[k] for k in render_settings if render_settings[k] is not None}
-                event = super().step({**teleport_action, **render_kwargs})
-            else:
-                event = super().step(teleport_action)
+            # 传 render_settings 作为额外参数
+            event = super().step({**teleport_action, **{
+                k: render_settings[k] for k in render_settings
+            }})
 
             if event.metadata['lastActionSuccess']:
                 events.append(event)
 
         return events
+
     def smooth_look(self, action, render_settings=None):
-        '''
-        smoother LookUp and LookDown
-        '''
+        """
+        Smoother LookUp and LookDown compatible with AI2-THOR 4.3.0
+        """
         if render_settings is None:
             render_settings = DEFAULT_RENDER_SETTINGS
+
         event = self.last_event
         start_horizon = event.metadata['agent']['cameraHorizon']
-        rotation = np.round(event.metadata['agent']['rotation']['y'], 4)
+        rotation_y = np.round(event.metadata['agent']['rotation']['y'], 4)
+        # LookUp 为 +1，LookDown 为 -1
         end_horizon = start_horizon + constants.AGENT_HORIZON_ADJ * (1 - 2 * int(action['action'] == 'LookUp'))
         position = event.metadata['agent']['position']
 
         events = []
-        for xx in np.arange(.1, 1.0001, .1):
-            if xx < 1:
-                teleport_action = {
-                    'action': 'TeleportFull',
-                    'rotation': rotation,
-                    'x': position['x'],
-                    'z': position['z'],
-                    'y': position['y'],
-                    'horizon': np.round(start_horizon * (1 - xx) + end_horizon * xx, 3),
-                    'tempRenderChange': True,
-                    'renderNormalsImage': False,
-                    'renderImage': render_settings['renderImage'],
-                    'renderClassImage': render_settings['renderClassImage'],
-                    'renderObjectImage': render_settings['renderObjectImage'],
-                    'renderDepthImage': render_settings['renderDepthImage'],
-                }
-                event = super().step(teleport_action)
-            else:
-                teleport_action = {
-                    'action': 'TeleportFull',
-                    'rotation': rotation,
-                    'x': position['x'],
-                    'z': position['z'],
-                    'y': position['y'],
-                    'horizon': np.round(start_horizon * (1 - xx) + end_horizon * xx, 3),
-                }
-                event = super().step(teleport_action)
+
+        for xx in np.arange(0.1, 1.0001, 0.1):
+            current_horizon = np.round(start_horizon * (1 - xx) + end_horizon * xx, 3)
+            teleport_action = {
+                'action': 'TeleportFull',
+                'x': position['x'],
+                'y': position['y'],
+                'z': position['z'],
+                'rotation': Vector3(0, rotation_y, 0),
+                'horizon': current_horizon,
+                'standing': True,
+                'forceAction': True
+            }
+
+            # 合并 render_settings
+            teleport_action = {**teleport_action, **{
+                k: render_settings[k] for k in render_settings
+            }}
+
+            event = super().step(teleport_action)
 
             if event.metadata['lastActionSuccess']:
                 events.append(event)
-        return events
 
+        return events
     def look_angle(self, angle, render_settings=None):
         '''
         look at a specific angle

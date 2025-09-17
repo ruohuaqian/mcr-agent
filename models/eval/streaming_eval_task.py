@@ -718,10 +718,24 @@ class StreamingEvalTask(Eval):
             print(
                 f'saving: ' + os.path.join(save_dir, task['task'], str(task['repeat_idx']), str(k) + '_' + a + '.png'))
 
-        json_path = os.path.join(model['nav'].args.data, task['task'], '%s' % model['nav'].args.pp_folder,
-                                 'ann_%d.json' % task['repeat_idx'])
-        shutil.copyfile(json_path, os.path.join(save_dir, task['task'], str(task['repeat_idx']),
-                                                'ann_%d.json' % task['repeat_idx']))
+
+        json_url = hf_hub_url(
+            repo_id=model['nav'].args.huggingface_id,
+            filename=f"{task['task']}/pp/ann_{task['repeat_idx']}.json",
+            repo_type="dataset"
+        )
+
+        json_response = requests.get(
+            json_url,
+            timeout=120,
+            stream=False
+        )
+        if json_response.status_code != 200:
+            return None
+        ex = json.loads(json_response.content.decode('utf-8'))
+        with open(os.path.join(save_dir, task['task'], str(task['repeat_idx']),
+                     'ann_%d.json' % task['repeat_idx']), 'w', encoding='utf-8') as f:
+            json.dump(ex, f, ensure_ascii=False, indent=2)
 
         pcs = env.get_goal_conditions_met()
         goal_condition_success_rate = pcs[0] / float(pcs[1])
