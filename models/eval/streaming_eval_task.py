@@ -138,52 +138,36 @@ def get_panoramic_views(env):
     return curr_image_left, curr_image_right, curr_image_up, curr_image_down
 
 
-def get_panoramic_actions(env):
-    action_pairs = [
-        ['RotateLeft_90', 'RotateRight_90'],
-        ['RotateRight_90', 'RotateLeft_90'],
-        ['LookUp_15', 'LookDown_15'],
-        ['LookDown_15', 'LookUp_15'],
-    ]
-    imgs = []
-    actions = []
 
-    curr_image = Image.fromarray(np.uint8(env.last_event.frame))
-
-    for a1, a2 in action_pairs:
-        t_success, _, _, err, api_action = env.va_interact(a1, interact_mask=None, smooth_nav=False)
-        actions.append(a1)
-        imgs.append(Image.fromarray(np.uint8(env.last_event.frame)))
-        # if len(err) == 0:
-        if curr_image != imgs[-1]:
-            t_success, _, _, err, api_action = env.va_interact(a2, interact_mask=None, smooth_nav=False)
-            actions.append(a2)
-        else:
-            # print(err)
-            printing_log('Error while {}'.format(a1))
-    return actions, imgs
-
-
-# nameflag = False
-def printing_log(*args):
-    print(*args)
-
-    new_args = list(args)
-    # if nameflag == False:
-
-    filename = 'new_logs/loop_break_0.3_thresh_val_unseen_latest_logs.txt'
-    # flag = True
-
-    os.makedirs(os.path.dirname(filename), exist_ok=True)
-    with open(filename, 'a') as f:
-        for ar in new_args:
-            f.write(f'{ar}\n')
 
 
 class StreamingEvalTask(Eval):
+    _current_split = None
+
+    @classmethod
+    def set_split(cls, split):
+        cls._current_split = split
+        cls._current_task_order = 0
+
+    @classmethod
+    def printing_log(cls, *args):
+        print(*args)
+
+        new_args = list(args)
+        # if nameflag == False:
+
+        filename = f'new_logs/loop_break_0.3_thresh_{cls._current_split}_{cls._current_task_order}_logs.txt'
+        # flag = True
+
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(filename, 'a') as f:
+            for ar in new_args:
+                f.write(f'{ar}\n')
 
     @classmethod
     def run_streaming(cls, model, resnet, task_queue, args, lock, successes, failures, results):
+        cls.set_split(args.eval_split)
+        print(f"Using split: {cls._current_split}")
         # 启动THOR环境
         env = ThorEnv(use_virtual_display=True)
 
@@ -192,6 +176,7 @@ class StreamingEvalTask(Eval):
                 break
 
             task = task_queue.get()
+            cls._current_task_order += 1
 
             if os.path.exists(os.path.join('logs/success', task['task'], str(task['repeat_idx']))) \
                     or os.path.exists(os.path.join('logs/failure', task['task'], str(task['repeat_idx']))):
@@ -211,7 +196,7 @@ class StreamingEvalTask(Eval):
             except Exception as e:
                 import traceback
                 traceback.print_exc()
-                printing_log("Error: " + repr(e))
+                cls.printing_log("Error: " + repr(e))
 
         env.stop()
 
@@ -223,6 +208,32 @@ class StreamingEvalTask(Eval):
     def unwrap_to_feat(feature_batch_stream):
         for batch, feat in feature_batch_stream:
             return feat
+
+
+    @classmethod
+    def get_panoramic_actions(cls, env):
+        action_pairs = [
+            ['RotateLeft_90', 'RotateRight_90'],
+            ['RotateRight_90', 'RotateLeft_90'],
+            ['LookUp_15', 'LookDown_15'],
+            ['LookDown_15', 'LookUp_15'],
+        ]
+        imgs = []
+        actions = []
+
+        curr_image = Image.fromarray(np.uint8(env.last_event.frame))
+
+        for a1, a2 in action_pairs:
+            t_success, _, _, err, api_action = env.va_interact(a1, interact_mask=None, smooth_nav=False)
+            actions.append(a1)
+            imgs.append(Image.fromarray(np.uint8(env.last_event.frame)))
+            # if len(err) == 0:
+            if curr_image != imgs[-1]:
+                t_success, _, _, err, api_action = env.va_interact(a2, interact_mask=None, smooth_nav=False)
+                actions.append(a2)
+            else:
+                cls.printing_log('Error while {}'.format(a1))
+        return actions, imgs
 
     @classmethod
     def doManipulation(cls, total_actions, total_frames, action_high_name, data, action_high_order, resnet,
@@ -265,7 +276,7 @@ class StreamingEvalTask(Eval):
 
         objects_present = [classes[o].lower() for o in out['labels']]
         if args.debug:
-            printing_log(obj_name[0], "in objects_present", obj_name[0] in objects_present)
+            cls.printing_log(obj_name[0], "in objects_present", obj_name[0] in objects_present)
 
         if obj_name[0] in objects_present:
             posi = objects_present.index(obj_name[0])
@@ -294,11 +305,11 @@ class StreamingEvalTask(Eval):
                     action = model.vocab['action_low'].index2word(torch.argmax(dist_action * action_mask))
 
                     if args.debug:
-                        printing_log(action_high_name, action)
+                        cls.printing_log(action_high_name, action)
                     if action == cls.STOP_TOKEN:
 
                         if args.debug:
-                            printing_log("\tpredicted STOP")
+                            cls.printing_log("\tpredicted STOP")
                         return True, t, fails, total_actions, total_frames
 
                     # mask generation
@@ -335,7 +346,7 @@ class StreamingEvalTask(Eval):
 
                     # debug
                     if args.debug:
-                        printing_log("Pred: ", action_high_name, action, classes[pred_class])
+                        cls.printing_log("Pred: ", action_high_name, action, classes[pred_class])
 
                     # update prev action
                     prev_action = str(action)
@@ -421,10 +432,10 @@ class StreamingEvalTask(Eval):
 
         with open('subgoal_predictions.csv', 'a') as f:
             f.write(str(subgoals_to_complete) + '\n')
-        printing_log(subgoals_to_complete)
+        cls.printing_log(subgoals_to_complete)
 
         # return
-        printing_log(pred_subgoal, len(pred_subgoal))
+        cls.printing_log(pred_subgoal, len(pred_subgoal))
         if (len(pred_subgoal) % 2):
             for iii in range(len(pred_subgoal) - 1):
                 if not (iii % 2):
@@ -433,7 +444,7 @@ class StreamingEvalTask(Eval):
         if pred_subgoal[-2].item() == model['nav'].vocab['action_high'].word2index('GotoLocation', train=False):
             pred_subgoal[-2] = model['nav'].vocab['action_high'].word2index('PutObject', train=False)
 
-        printing_log("changes", [model['nav'].vocab['action_high'].index2word(list(pred_subgoal.cpu().numpy()))])
+        cls.printing_log("changes", [model['nav'].vocab['action_high'].index2word(list(pred_subgoal.cpu().numpy()))])
         # exit()
         mix_feat_obj_stream = model['object'].streaming_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1,
                                                                   pred_subgoal.cpu().numpy(),
@@ -496,7 +507,7 @@ class StreamingEvalTask(Eval):
         while not done:
             # break if max_steps reached
             if t >= args.max_steps:
-                printing_log("max steps exceeded")
+                cls.printing_log("max steps exceeded")
                 break
 
             # extract visual features
@@ -506,7 +517,7 @@ class StreamingEvalTask(Eval):
             feat['frames'] = vis_feat
             vis_feats.append(vis_feat)
             if model['nav'].panoramic:
-                panoramic_actions, imgs = get_panoramic_actions(env)
+                panoramic_actions, imgs = cls.get_panoramic_actions(env)
                 curr_image_left, curr_image_right, curr_image_up, curr_image_down = imgs
                 feat['frames_left'] = resnet.featurize([curr_image_left], batch=1).unsqueeze(0)
                 feat['frames_right'] = resnet.featurize([curr_image_right], batch=1).unsqueeze(0)
@@ -571,7 +582,7 @@ class StreamingEvalTask(Eval):
                                                                                         maskrcnn, curr_image,
                                                                                         lang_index, env, args, t, fails)
                 if fails >= args.max_fails:
-                    printing_log("Interact API failed %d times" % fails + "; latest error '%s'" % err)
+                    cls.printing_log("Interact API failed %d times" % fails + "; latest error '%s'" % err)
                     break
 
                 if man_success:
@@ -599,7 +610,7 @@ class StreamingEvalTask(Eval):
                                                                                                 t, fails)
 
                         if fails >= args.max_fails:
-                            printing_log("Interact API failed %d times" % fails + "; latest error '%s'" % err)
+                            cls.printing_log("Interact API failed %d times" % fails + "; latest error '%s'" % err)
                             break
 
                         # if man_success:
@@ -628,7 +639,7 @@ class StreamingEvalTask(Eval):
                                                                                                     args, t, fails)
 
                             if fails >= args.max_fails:
-                                printing_log("Interact API failed %d times" % fails + "; latest error '%s'" % err)
+                                cls.printing_log("Interact API failed %d times" % fails + "; latest error '%s'" % err)
                                 break
                             subgoal_running += 1
                             lang_index += 1
@@ -651,7 +662,7 @@ class StreamingEvalTask(Eval):
             if isLoop:
                 action = rand_action
                 loop_count += 1
-                printing_log("loop_count", loop_count)
+                cls.printing_log("loop_count", loop_count)
 
             if prev_vis_feat != None:
                 od_score = ((prev_vis_feat - vis_feat) ** 2).sum().sqrt()
@@ -679,7 +690,7 @@ class StreamingEvalTask(Eval):
                 fails += 1
 
                 if fails >= args.max_fails:
-                    printing_log("Interact API failed %d times" % fails + "; latest error '%s'" % err)
+                    cls.printing_log("Interact API failed %d times" % fails + "; latest error '%s'" % err)
                     break
 
             # next time-step
@@ -694,7 +705,7 @@ class StreamingEvalTask(Eval):
         save_dir = 'logs/'
         goal_satisfied = env.get_goal_satisfied()
         if goal_satisfied:
-            printing_log("Goal Reached")
+            cls.printing_log("Goal Reached")
             success = True
             save_dir += 'success/'
         else:
@@ -747,16 +758,16 @@ class StreamingEvalTask(Eval):
         # overall results
         results['all'] = cls.get_metrics(successes, failures)
 
-        printing_log("-------------")
-        printing_log("SR: %d/%d = %.5f" % (results['all']['success']['num_successes'],
+        cls.printing_log("-------------")
+        cls.printing_log("SR: %d/%d = %.5f" % (results['all']['success']['num_successes'],
                                            results['all']['success']['num_evals'],
                                            results['all']['success']['success_rate']))
-        printing_log("PLW SR: %.5f" % (results['all']['path_length_weighted_success_rate']))
-        printing_log("GC: %d/%d = %.5f" % (results['all']['goal_condition_success']['completed_goal_conditions'],
+        cls.printing_log("PLW SR: %.5f" % (results['all']['path_length_weighted_success_rate']))
+        cls.printing_log("GC: %d/%d = %.5f" % (results['all']['goal_condition_success']['completed_goal_conditions'],
                                            results['all']['goal_condition_success']['total_goal_conditions'],
                                            results['all']['goal_condition_success']['goal_condition_success_rate']))
-        printing_log("PLW GC: %.5f" % (results['all']['path_length_weighted_goal_condition_success_rate']))
-        printing_log("-------------")
+        cls.printing_log("PLW GC: %.5f" % (results['all']['path_length_weighted_goal_condition_success_rate']))
+        cls.printing_log("-------------")
 
         # task type specific results
         task_types = ['pick_and_place_simple', 'pick_clean_then_place_in_recep', 'pick_heat_then_place_in_recep',

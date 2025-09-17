@@ -5,8 +5,8 @@ NUM_EPOCHS=50
 score_table = -np.ones((NUM_EPOCHS,8))
 
 for i in range(NUM_EPOCHS):
-    for s in ['valid_seen', 'valid_unseen']:
-        fname = 'log_{}_{}.txt'.format(i, s)
+    for s in ['valid_seen', 'valid_unseen', 'test_seen', 'test_unseen']:
+        fname = 'new_logs/loop_break_0.3_thresh_{}_{}_logs.txt'.format(s, i)
         if not os.path.exists(fname):
             continue
         with open(fname, 'r') as f:
