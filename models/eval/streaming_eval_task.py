@@ -310,7 +310,7 @@ class StreamingEvalTask(Eval):
 
                         if args.debug:
                             cls.printing_log("\tpredicted STOP")
-                        return True, t, fails, total_actions, total_frames
+                        return True, t, fails, total_actions, total_frames, None
 
                     # mask generation
                     mask = None
@@ -371,7 +371,7 @@ class StreamingEvalTask(Eval):
 
                     epsilon = 1
                     if od_score < epsilon:
-                        return False, t, fails, total_actions, total_frames
+                        return False, t, fails, total_actions, total_frames, error
 
                     if not t_success:
                         fails += 1
@@ -388,7 +388,7 @@ class StreamingEvalTask(Eval):
                     m_prev_action = action
 
         t += 1
-        return False, t, fails, total_actions, total_frames
+        return False, t, fails, total_actions, total_frames, error
 
     @classmethod
     def evaluate_streaming(cls, env, model, r_idx, resnet, data, args, lock, successes, failures, results, task):
@@ -571,7 +571,7 @@ class StreamingEvalTask(Eval):
                 action_high = model['nav'].vocab['action_high'].index2word(
                     (feat['action_high_order'][0][subgoal_running].item()))
 
-                man_success, t, fails, total_actions, total_frames = cls.doManipulation(total_actions, total_frames,
+                man_success, t, fails, total_actions, total_frames, err = cls.doManipulation(total_actions, total_frames,
                                                                                         action_high,
                                                                                         data,
                                                                                         pred_subgoal.cpu().numpy(),
@@ -594,7 +594,7 @@ class StreamingEvalTask(Eval):
                         curr_image = Image.fromarray(np.uint8(env.last_event.frame))
                         vis_feat = resnet.featurize([curr_image], batch=1).unsqueeze(0)
                         feat['frames'] = vis_feat
-                        man_success, t, fails, total_actions, total_frames = cls.doManipulation(total_actions,
+                        man_success, t, fails, total_actions, total_frames, err = cls.doManipulation(total_actions,
                                                                                                 total_frames,
                                                                                                 new_action_high,
                                                                                                 copy.deepcopy(
@@ -622,7 +622,7 @@ class StreamingEvalTask(Eval):
                             curr_image = Image.fromarray(np.uint8(env.last_event.frame))
                             vis_feat = resnet.featurize([curr_image], batch=1).unsqueeze(0)
                             feat['frames'] = vis_feat
-                            man_success, t, fails, total_actions, total_frames = cls.doManipulation(total_actions,
+                            man_success, t, fails, total_actions, total_frames, err = cls.doManipulation(total_actions,
                                                                                                     total_frames,
                                                                                                     new_action_high3,
                                                                                                     copy.deepcopy(
