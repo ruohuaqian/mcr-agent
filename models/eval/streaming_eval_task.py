@@ -75,12 +75,12 @@ def get_panoramic_views(env):
     env.step({
         "action": "TeleportFull",
         "horizon": horizon,
-        "rotateOnTeleport": True,
-        "rotation": (rotation['y'] + 270.0) % 360,
+        "rotation": {"x": 0, "y": (rotation['y'] + 270.0) % 360, "z": 0},
         "x": position['x'],
         "y": position['y'],
         "z": position['z'],
         "forceAction": True,
+        "standing": True,
     })
     curr_image_left = Image.fromarray(np.uint8(env.last_event.frame))
 
@@ -88,12 +88,12 @@ def get_panoramic_views(env):
     env.step({
         "action": "TeleportFull",
         "horizon": horizon,
-        "rotateOnTeleport": True,
-        "rotation": (rotation['y'] + 90.0) % 360,
+        "rotation": {"x": 0, "y": (rotation['y'] + 90.0) % 360, "z": 0},
         "x": position['x'],
         "y": position['y'],
         "z": position['z'],
         "forceAction": True,
+        "standing": True,
     })
     curr_image_right = Image.fromarray(np.uint8(env.last_event.frame))
 
@@ -101,12 +101,12 @@ def get_panoramic_views(env):
     env.step({
         "action": "TeleportFull",
         "horizon": np.round(horizon - constants.AGENT_HORIZON_ADJ),
-        "rotateOnTeleport": True,
-        "rotation": rotation['y'],
+        "rotation": {"x": 0, "y": rotation['y'], "z": 0},
         "x": position['x'],
         "y": position['y'],
         "z": position['z'],
         "forceAction": True,
+        "standing": True,
     })
     curr_image_up = Image.fromarray(np.uint8(env.last_event.frame))
 
@@ -114,12 +114,12 @@ def get_panoramic_views(env):
     env.step({
         "action": "TeleportFull",
         "horizon": np.round(horizon + constants.AGENT_HORIZON_ADJ),
-        "rotateOnTeleport": True,
-        "rotation": rotation['y'],
+        "rotation": {"x": 0, "y": rotation['y'], "z": 0},
         "x": position['x'],
         "y": position['y'],
         "z": position['z'],
         "forceAction": True,
+        "standing": True,
     })
     curr_image_down = Image.fromarray(np.uint8(env.last_event.frame))
 
@@ -127,12 +127,12 @@ def get_panoramic_views(env):
     env.step({
         "action": "TeleportFull",
         "horizon": horizon,
-        "rotateOnTeleport": True,
-        "rotation": rotation['y'],
+        "rotation": {"x": 0, "y": rotation['y'], "z": 0},
         "x": position['x'],
         "y": position['y'],
         "z": position['z'],
         "forceAction": True,
+        "standing": True,
     })
 
     return curr_image_left, curr_image_right, curr_image_up, curr_image_down
@@ -170,6 +170,7 @@ def printing_log(*args):
 
     new_args = list(args)
     # if nameflag == False:
+
     filename = 'new_logs/loop_break_0.3_thresh_val_unseen_latest_logs.txt'
     # flag = True
 
@@ -213,6 +214,7 @@ class StreamingEvalTask(Eval):
                 printing_log("Error: " + repr(e))
 
         env.stop()
+
     @staticmethod
     def wrap_to_stream(data):
         yield data
@@ -245,7 +247,8 @@ class StreamingEvalTask(Eval):
 
         # extract language features
         # model.featurize([(traj_data, False)], action_high_order, load_mask=False)
-        feat1 = cls.unwrap_to_feat(model.streaming_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1, action_high_order, load_mask=False))
+        feat1 = cls.unwrap_to_feat(
+            model.streaming_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1, action_high_order, load_mask=False))
 
         # previous action for teacher-forcing during expert execution (None is used for initialization)
         prev_action = None
@@ -391,7 +394,8 @@ class StreamingEvalTask(Eval):
         nav_traj_data = copy.deepcopy(traj_data)
         cls.setup_scene(env, (nav_traj_data), r_idx, args, reward_type=reward_type)
 
-        mix_feat_subgoal_stream = model['subgoal'].streaming_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1, load_mask=True)
+        mix_feat_subgoal_stream = model['subgoal'].streaming_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1,
+                                                                       load_mask=True)
         feat_subgoal = cls.unwrap_to_feat(mix_feat_subgoal_stream)
 
         out_subgoal = model['subgoal'].forward(feat_subgoal)
@@ -431,8 +435,9 @@ class StreamingEvalTask(Eval):
 
         printing_log("changes", [model['nav'].vocab['action_high'].index2word(list(pred_subgoal.cpu().numpy()))])
         # exit()
-        mix_feat_obj_stream = model['object'].streaming_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1, pred_subgoal.cpu().numpy(),
-                                             load_mask=True)
+        mix_feat_obj_stream = model['object'].streaming_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1,
+                                                                  pred_subgoal.cpu().numpy(),
+                                                                  load_mask=True)
         feat_obj = cls.unwrap_to_feat(mix_feat_obj_stream)
         out_obj = model['object'].forward(feat_obj)
         out_obj = out_obj['out_obj']  # classes.index need conversion to value corresponding to nn.embedding
@@ -440,8 +445,9 @@ class StreamingEvalTask(Eval):
         objects2find = [classes[o.item()] for o in pred_obj]
 
         # extract language features
-        mix_feat_stream = model['nav'].streaming_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1, pred_subgoal.cpu().numpy(), objects2find,
-                                      load_mask=True)
+        mix_feat_stream = model['nav'].streaming_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1,
+                                                           pred_subgoal.cpu().numpy(), objects2find,
+                                                           load_mask=True)
         feat = cls.unwrap_to_feat(mix_feat_stream)
         # goal instr
         goal_instr = nav_traj_data['turk_annotations']['anns'][r_idx]['task_desc']
@@ -777,9 +783,9 @@ class StreamingEvalTask(Eval):
         total_path_len_weight = sum([entry['path_len_weight'] for entry in successes]) + \
                                 sum([entry['path_len_weight'] for entry in failures])
         completed_goal_conditions = sum([entry['completed_goal_conditions'] for entry in successes]) + \
-                                   sum([entry['completed_goal_conditions'] for entry in failures])
+                                    sum([entry['completed_goal_conditions'] for entry in failures])
         total_goal_conditions = sum([entry['total_goal_conditions'] for entry in successes]) + \
-                               sum([entry['total_goal_conditions'] for entry in failures])
+                                sum([entry['total_goal_conditions'] for entry in failures])
 
         # metrics
         sr = float(num_successes) / num_evals
@@ -797,13 +803,12 @@ class StreamingEvalTask(Eval):
                           'num_evals': num_evals,
                           'success_rate': sr}
         res['goal_condition_success'] = {'completed_goal_conditions': completed_goal_conditions,
-                                        'total_goal_conditions': total_goal_conditions,
-                                        'goal_condition_success_rate': pc}
+                                         'total_goal_conditions': total_goal_conditions,
+                                         'goal_condition_success_rate': pc}
         res['path_length_weighted_success_rate'] = plw_sr
         res['path_length_weighted_goal_condition_success_rate'] = plw_pc
 
         return res
-
 
     def create_stats(self):
         '''
@@ -811,7 +816,6 @@ class StreamingEvalTask(Eval):
         '''
         self.successes, self.failures = self.manager.list(), self.manager.list()
         self.results = self.manager.dict()
-
 
     def save_results(self):
         results = {'successes': list(self.successes),
