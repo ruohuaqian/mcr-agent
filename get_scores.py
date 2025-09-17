@@ -6,11 +6,13 @@ score_table = -np.ones((NUM_EPOCHS,8))
 
 for i in range(NUM_EPOCHS):
     for s in ['valid_seen', 'valid_unseen', 'test_seen', 'test_unseen']:
-        os.path.dirname(os.path.abspath(__file__))
+        print(os.path.dirname(os.path.abspath(__file__)))
         fname = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                             '/models/new_logs/loop_break_0.3_thresh_{}_{}_logs.txt'.format(s, i))
+                             'models/new_logs/loop_break_0.3_thresh_{}_{}_logs.txt'.format(s, i))
+        print(fname)
         if not os.path.exists(fname):
-            continue
+          print("?")
+          continue
         with open(fname, 'r') as f:
             try:
                 # scores: 0 (SR) 1 (PLW SR) 2 (GC) 3 (PLW GC)
@@ -22,7 +24,8 @@ for i in range(NUM_EPOCHS):
                 dsplit = 0 if s == 'valid_seen' else 4 # unseen for else
                 score_table[i][dsplit:dsplit+4] = np.array(scores)
             except:
-                continue
+              print("?")
+              continue
 
 score_table = score_table * 100. # to percentage
 

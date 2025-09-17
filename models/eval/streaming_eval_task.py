@@ -176,7 +176,7 @@ class StreamingEvalTask(Eval):
 
                 task = task_queue.get()
                 cls._current_task_order += 1
-
+            # todo save automatically or rename or update, no skip
             if os.path.exists(os.path.join('logs/success', task['task'], str(task['repeat_idx']))) \
                     or os.path.exists(os.path.join('logs/failure', task['task'], str(task['repeat_idx']))):
                 print("skipping:", os.path.join('logs/failure', task['task'], str(task['repeat_idx'])))
