@@ -1,4 +1,7 @@
-python models/eval/eval_seq2seq.py   \
+export PYTHONPATH="${MCR_ROOT}:${MCR_ROOT}/models:${PYTHONPATH}"
+
+cd "${MCR_ROOT}/models"
+python eval/eval_seq2seq.py   \
 		--nav_model_path /content/drive/MyDrive/mcr-agent/exp/MasterPolicy/latest.pth  \
 		--pickup_model_path /content/drive/MyDrive/mcr-agent/exp/Interactions/PickupObject/latest.pth  \
 		--put_model_path /content/drive/MyDrive/mcr-agent/exp/Interactions/PutObject/latest.pth  \
@@ -9,10 +12,11 @@ python models/eval/eval_seq2seq.py   \
 		--slice_model_path /content/drive/MyDrive/mcr-agent/exp/Interactions/SliceObject/latest.pth  \
 		--object_model_path /content/drive/MyDrive/mcr-agent/exp/OEM/latest.pth  \
 		--subgoal_model_path /content/drive/MyDrive/mcr-agent/exp/PCC/latest.pth  \
-		--eval_split	valid_seen                          \
-		--huggingface_id		byeonghwikim/abp dataset       \
+		--splits /content/drive/MyDrive/mcr-agent/splits/rest_train.json \
+		--eval_split	test_seen                          \
+		--huggingface_id		byeonghwikim/abp_dataset       \
 		--gpu                                               \
 		--max_step	80                                 \
 		--max_fail	10                                  \
-		--num_threads 4; 
-
+		--reward_config ${MCR_ROOT}/models/config/rewards.json \
+		--num_threads 4;

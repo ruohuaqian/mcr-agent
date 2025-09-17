@@ -1,3 +1,4 @@
+import copy
 import os
 import json
 import numpy as np
@@ -244,7 +245,7 @@ class StreamingEvalTask(Eval):
 
         # extract language features
         # model.featurize([(traj_data, False)], action_high_order, load_mask=False)
-        feat1 = cls.unwrap_to_feat(model.streaming_featurize(cls.wrap_to_stream(data), 1, action_high_order, load_mask=False))
+        feat1 = cls.unwrap_to_feat(model.streaming_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1, action_high_order, load_mask=False))
 
         # previous action for teacher-forcing during expert execution (None is used for initialization)
         prev_action = None
@@ -390,7 +391,7 @@ class StreamingEvalTask(Eval):
         nav_traj_data = copy.deepcopy(traj_data)
         cls.setup_scene(env, (nav_traj_data), r_idx, args, reward_type=reward_type)
 
-        mix_feat_subgoal_stream = model['subgoal'].streaming_featurize(cls.wrap_to_stream(data), 1, load_mask=True)
+        mix_feat_subgoal_stream = model['subgoal'].streaming_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1, load_mask=True)
         feat_subgoal = cls.unwrap_to_feat(mix_feat_subgoal_stream)
 
         out_subgoal = model['subgoal'].forward(feat_subgoal)

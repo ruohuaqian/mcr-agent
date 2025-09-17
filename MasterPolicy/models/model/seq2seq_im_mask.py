@@ -14,7 +14,7 @@ from gen.utils.image_util import decompress_mask
 
 from PIL import Image
 
-from gen  import constants
+from MasterPolicy.models.model import constants
 classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp', 'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
 
 from MasterPolicy.models.nn.resnet import Resnet
