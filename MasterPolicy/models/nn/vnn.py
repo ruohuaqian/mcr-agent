@@ -126,6 +126,7 @@ class DynamicConvLayer(nn.Module):
         self.head2 = nn.Linear(dhid, dframe)
         self.head3 = nn.Linear(dhid, dframe)
         self.filter_activation = nn.Tanh()
+        self.dyn_proj = nn.Linear(dynamic_filters_dim, vis_dim, bias=False)
 
     def forward(self, frame, weighted_lang_t_instr):
         """ dynamic convolutional filters """
@@ -136,12 +137,18 @@ class DynamicConvLayer(nn.Module):
         dynamic_filters = self.filter_activation(dynamic_filters)
         dynamic_filters = F.normalize(dynamic_filters, p=2, dim=-1)
 
-        """ attention map """
         frame = frame.view(frame.size(0), frame.size(1), -1)
-        scale_2 = np.sqrt(frame.shape[1]) #torch.sqrt(torch.tensor(frame.shape[1], dtype=torch.double))
-        attention_map = torch.bmm(frame.transpose(1,2), dynamic_filters.transpose(-1, -2)) / scale_2
-        attention_map = attention_map.reshape(attention_map.size(0), -1)
+        scale_2 = np.sqrt(frame.shape[1])
 
+        # if dim(dynamic_filters) > frame 的通道数，用平均池化对齐
+        if dynamic_filters.size(-1) != frame.size(1):
+            # simple mean pooling: 把 extra 维度平均掉，得到 frame.size(1) 维
+            dyn = dynamic_filters.transpose(-1, -2)  # (B, D_dyn, p)
+            dyn = F.adaptive_avg_pool1d(dyn, frame.size(1))  # (B, frame.size(1), p)
+            dynamic_filters = dyn.transpose(-1, -2)  # (B, p, frame.size(1))
+
+        attention_map = torch.bmm(frame.transpose(1, 2), dynamic_filters.transpose(-1, -2)) / scale_2
+        attention_map = attention_map.reshape(attention_map.size(0), -1)
         return attention_map
 ######################################################################################################################
 
