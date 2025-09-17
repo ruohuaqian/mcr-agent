@@ -301,8 +301,9 @@ class Module(Base):
                     batch = []
 
             except Exception as e:
-                print(f"Skipping a problematic data item due to error: {e}")
-                raise e
+                import traceback
+                traceback.print_exc()
+                print(f"Skipping a problematic data item due to error: {repr(e)}")
 
         if batch:
             final_batch_feat = self._tensorize_and_pad(batch_feat, device)
@@ -457,8 +458,9 @@ class Module(Base):
                 if self.orientation:
                     feat_one = self._add_orientation_features(feat_one, device)
         except Exception as e:
-            print(f"Error processing task: {e}")
-            raise e
+            import traceback
+            traceback.print_exc()
+            print(f"Error processing task: {repr(e)}")
             return None
         return feat_one
 

@@ -140,6 +140,7 @@ def get_panoramic_views(env):
 
 class StreamingEvalTask(Eval):
     _current_split = None
+    cls._current_task_order = 0
 
     @classmethod
     def set_split(cls, split):
@@ -194,6 +195,7 @@ class StreamingEvalTask(Eval):
                 import traceback
                 traceback.print_exc()
                 cls.printing_log("Error: " + repr(e))
+                continue
 
         env.stop()
 

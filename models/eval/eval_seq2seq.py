@@ -61,7 +61,7 @@ if __name__ == '__main__':
     if args.subgoals:
         eval = EvalSubgoals(args, manager)
     else:
-    # 替换原有的评估调用
+    # replace the eval task
         eval = StreamingEvalTask(args, manager)
     # start threads
     eval.spawn_threads_streaming()

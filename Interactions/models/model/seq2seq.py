@@ -360,8 +360,9 @@ class Module(nn.Module):
             yield from self.streaming_featurize(data_stream, batch_size)
         except Exception as e:
             error_no += 1
-            print(f"no. {error_no} of wrong trajs, {e}")
-            raise e
+            import traceback
+            traceback.print_exc()
+            print(f"no. {error_no} of wrong trajs, {repr(e)}")
 
     def run_pred_streaming(self, dev, args=None, name='dev', iter=0):
         '''

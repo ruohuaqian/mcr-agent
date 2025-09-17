@@ -239,9 +239,9 @@ class Module(nn.Module):
                     train_iter += args.batch
 
                 except Exception as e:
-                    print(f"Error in batch processing: {e}")
-                    raise e
-                    continue
+                    import traceback
+                    traceback.print_exc()
+                    print(f"Error in batch processing: {repr(e)}")
 
             # 保存检查点
             stats = {'epoch': epoch, c_st:c_st}
@@ -356,8 +356,9 @@ class Module(nn.Module):
             yield from self.streaming_featurize(data_stream, batch_size)
         except Exception as e:
             error_no += 1
-            print(f"no. {error_no} of wrong trajs, {e}")
-            raise e
+            import traceback
+            traceback.print_exc()
+            print(f"no. {error_no} of wrong trajs, {repr(e)}")
 
 
     def run_pred_streaming(self, dev, args=None, name='dev', iter=0):
