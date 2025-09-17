@@ -46,11 +46,11 @@ def get_panoramic_views(env):
     env.step({
         "action": "TeleportFull",
         "horizon": horizon,
-        "rotateOnTeleport": True,
-        "rotation": (rotation['y'] + 270.0) % 360,
+        "rotation": {"x": 0, "y": (rotation['y'] + 270.0) % 360, "z": 0},
         "x": position['x'],
         "y": position['y'],
         "z": position['z'],
+        "standing": True,
         "forceAction": True,
     })
     curr_image_left = Image.fromarray(np.uint8(env.last_event.frame))
@@ -59,7 +59,7 @@ def get_panoramic_views(env):
     env.step({
         "action": "TeleportFull",
         "horizon": horizon,
-        "rotation": (rotation['y'] + 90.0) % 360,
+        "rotation": {"x": 0, "y": (rotation['y'] + 90.0) % 360, "z": 0},
         "x": position['x'],
         "y": position['y'],
         "z": position['z'],
@@ -72,11 +72,11 @@ def get_panoramic_views(env):
     env.step({
         "action": "TeleportFull",
         "horizon": np.round(horizon - constants.AGENT_HORIZON_ADJ),
-        "rotateOnTeleport": True,
-        "rotation": rotation['y'],
+        "rotation": {"x": 0, "y": rotation['y'], "z": 0},
         "x": position['x'],
         "y": position['y'],
         "z": position['z'],
+        "standing": True,
         "forceAction": True,
     })
     curr_image_up = Image.fromarray(np.uint8(env.last_event.frame))
@@ -85,11 +85,11 @@ def get_panoramic_views(env):
     env.step({
         "action": "TeleportFull",
         "horizon": np.round(horizon + constants.AGENT_HORIZON_ADJ),
-        "rotateOnTeleport": True,
-        "rotation": rotation['y'],
+        "rotation": {"x": 0, "y": rotation['y'], "z": 0},
         "x": position['x'],
         "y": position['y'],
         "z": position['z'],
+        "standing": True,
         "forceAction": True,
     })
     curr_image_down = Image.fromarray(np.uint8(env.last_event.frame))
@@ -99,10 +99,11 @@ def get_panoramic_views(env):
         "action": "TeleportFull",
         "horizon": horizon,
         "rotateOnTeleport": True,
-        "rotation": rotation['y'],
+        "rotation": {"x": 0, "y": rotation['y'], "z": 0},
         "x": position['x'],
         "y": position['y'],
         "z": position['z'],
+        "standing": True,
         "forceAction": True,
     })
 

@@ -138,9 +138,6 @@ def get_panoramic_views(env):
     return curr_image_left, curr_image_right, curr_image_up, curr_image_down
 
 
-
-
-
 class StreamingEvalTask(Eval):
     _current_split = None
 
