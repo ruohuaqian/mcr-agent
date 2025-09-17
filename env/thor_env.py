@@ -161,7 +161,6 @@ class ThorEnv(Controller):
           - step("RotateLeft", rotation=90)
           - step({"action": "RotateLeft", "rotation": 90})
         """
-        # 统一解析成 (act: str|None, params: dict)
         if isinstance(action, dict):
             act = action.get("action")
             params = {k: v for k, v in action.items() if k != "action"}
@@ -177,10 +176,8 @@ class ThorEnv(Controller):
             if 'standing' not in params:
                 params['standing'] = True  #reach the new required param
 
-        # 对于初始化/内部查询（如 "GetScenesInBuild"）或 act 为 None：直接透传
         if not isinstance(act, str):
             event = super().step(action=act, **params)
-            # 尽量不在这类内部调用上更新你自己的状态机
             return event
 
         # ---------- 平滑导航分支 ----------
@@ -307,54 +304,47 @@ class ThorEnv(Controller):
         return events
 
     def smooth_rotate(self, action, render_settings=None):
-        '''
-        smoother RotateLeft and RotateRight
-        '''
+        """
+        smoother RotateLeft and RotateRight for AI2-THOR 2.1.0
+        """
         if render_settings is None:
             render_settings = DEFAULT_RENDER_SETTINGS
+
         event = self.last_event
         horizon = np.round(event.metadata['agent']['cameraHorizon'], 4)
         position = event.metadata['agent']['position']
         rotation = event.metadata['agent']['rotation']
         start_rotation = rotation['y']
+
         if action['action'] == 'RotateLeft':
-            end_rotation = (start_rotation - 90)
+            end_rotation = (start_rotation - 90) % 360
         else:
-            end_rotation = (start_rotation + 90)
+            end_rotation = (start_rotation + 90) % 360
 
         events = []
-        for xx in np.arange(.1, 1.0001, .1):
+
+        for xx in np.arange(0.1, 1.0001, 0.1):
+            interp_y = np.round(start_rotation * (1 - xx) + end_rotation * xx, 3)
+            teleport_action = {
+                'action': 'TeleportFull',
+                'position': Vector3(position['x'], position['y'], position['z']),
+                'rotation': Vector3(0, interp_y, 0),
+                'horizon': horizon,
+                'standing': True,
+                'forceAction': True
+            }
+
+            # 对 render 设置单独处理，如果需要图像渲染
             if xx < 1:
-                teleport_action = {
-                    'action': 'TeleportFull',
-                    'rotation': np.round(start_rotation * (1 - xx) + end_rotation * xx, 3),
-                    'x': position['x'],
-                    'z': position['z'],
-                    'y': position['y'],
-                    'horizon': horizon,
-                    'tempRenderChange': True,
-                    'renderNormalsImage': False,
-                    'renderImage': render_settings['renderImage'],
-                    'renderClassImage': render_settings['renderClassImage'],
-                    'renderObjectImage': render_settings['renderObjectImage'],
-                    'renderDepthImage': render_settings['renderDepthImage'],
-                }
-                event = super().step(teleport_action)
+                render_kwargs = {k: render_settings[k] for k in render_settings if render_settings[k] is not None}
+                event = super().step({**teleport_action, **render_kwargs})
             else:
-                teleport_action = {
-                    'action': 'TeleportFull',
-                    'rotation': np.round(start_rotation * (1 - xx) + end_rotation * xx, 3),
-                    'x': position['x'],
-                    'z': position['z'],
-                    'y': position['y'],
-                    'horizon': horizon,
-                }
                 event = super().step(teleport_action)
 
             if event.metadata['lastActionSuccess']:
                 events.append(event)
-        return events
 
+        return events
     def smooth_look(self, action, render_settings=None):
         '''
         smoother LookUp and LookDown

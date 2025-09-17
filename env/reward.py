@@ -44,8 +44,10 @@ class GotoLocationAction(BaseAction):
         assert len(expert_plan) > goal_idx + 1
         next_subgoal = expert_plan[goal_idx + 1]['planner_action']
         next_goal_object = get_object(next_subgoal['objectId'], state.metadata)
-        done = next_goal_object['visible'] and curr_distance < self.rewards['min_reach_distance']
-
+        if next_goal_object is not None:
+            done = next_goal_object['visible'] and curr_distance < self.rewards['min_reach_distance']
+        else:
+            done = False
         if done:
             reward += self.rewards['positive']
 
