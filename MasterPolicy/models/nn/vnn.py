@@ -126,8 +126,6 @@ class DynamicConvLayer(nn.Module):
         self.head2 = nn.Linear(dhid, dframe)
         self.head3 = nn.Linear(dhid, dframe)
         self.filter_activation = nn.Tanh()
-        self.dyn_proj = nn.Linear(dynamic_filters_dim, vis_dim, bias=False)
-
     def forward(self, frame, weighted_lang_t_instr):
         """ dynamic convolutional filters """
         df1 = self.head1(weighted_lang_t_instr)
