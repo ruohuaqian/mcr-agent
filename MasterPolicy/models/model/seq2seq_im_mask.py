@@ -315,7 +315,7 @@ class Module(Base):
         ex = data_item['ex']
         im = data_item['im']
         try:
-            if action_higher_order is None:
+            if action_high_order is None:
                 action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
             else:
                 action_high_order = action_high_order
