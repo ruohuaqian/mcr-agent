@@ -271,7 +271,7 @@ class Module(nn.Module):
                         self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
             pprint.pprint(stats)
 
-    def create_streaming_dataset(self, task_list):
+    def create_streaming_dataset(self, task_list, split='train'):
         '''
         创建流式数据集 - 导航版本
         '''
@@ -292,18 +292,18 @@ class Module(nn.Module):
             if task_data is not None:
                 yield task_data
 
-    def load_streaming_task(self, task_path, repeat_idx, swapColor):
+    def load_streaming_task(self, task_path, repeat_idx, swapColor, split='train'):
         json_filename = f"{task_path}/pp/ann_{repeat_idx}.json"
         json_path = cached_hf_path(self.args.huggingface_id, json_filename)
         with open(json_path, "r", encoding="utf-8") as f:
             ex = json.load(f)
 
         if swapColor == 0:
-            pt_filename = f"train/{task_path}/{self.feat_pt}"
+            pt_filename = f"{split}/{task_path}/{self.feat_pt}"
         elif swapColor in [1, 2]:
-            pt_filename = f"train/{task_path}/feat_conv_colorSwap{swapColor}_panoramic.pt"
+            pt_filename = f"{split}/{task_path}/feat_conv_colorSwap{swapColor}_panoramic.pt"
         else:
-            pt_filename = f"train/{task_path}/feat_conv_onlyAutoAug{swapColor - 2}_panoramic.pt"
+            pt_filename = f"{split}/{task_path}/feat_conv_onlyAutoAug{swapColor - 2}_panoramic.pt"
 
         pt_path = cached_hf_path(self.args.huggingface_id, pt_filename)
         im = torch.load(pt_path, map_location="cpu")
