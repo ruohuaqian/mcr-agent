@@ -479,15 +479,15 @@ class Module(nn.Module):
             # 验证 seen
             valid_seen_loss = []
             for batch, feat in self.streaming_iterate(valid_seen_stream, self.args.batch):
-                out = self.forward(f)
+                out = self.forward(feat)
                 loss = self.compute_loss(out, batch, feat)
                 valid_seen_loss.append(sum(loss.values()).item())
 
             # 验证 unseen
             valid_unseen_loss = []
             for batch, feat in self.streaming_iterate(valid_unseen_stream, self.args.batch):
-                out = self.forward(f)
-                loss = self.compute_loss(out, batch, f)
+                out = self.forward(feat)
+                loss = self.compute_loss(out, batch, feat)
                 valid_unseen_loss.append(sum(loss.values()).item())
 
         # 记录验证结果
