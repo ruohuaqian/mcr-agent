@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
+MCR_ROOT=${MCR_ROOT:-/content/mcr-agent}
 # Defaults
 CKPT=""
 OUT=""
@@ -78,7 +78,8 @@ done
 [[ -z "$CKPT" || -z "$OUT" ]] && usage
 
 mkdir -p "$OUT"
-
+export PYTHONPATH="${MCR_ROOT}:${MCR_ROOT}/OEM:${PYTHONPATH}"
+cd "${MCR_ROOT}/OEM"
 # Build flags
 GPU_FLAG=$([ "$GPU" = "1" ] && echo "--gpu" || echo "")
 STREAM_FLAG=$([ "$USE_STREAMING" = "1" ] && echo "--use_streaming" || echo "")
