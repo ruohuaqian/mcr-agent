@@ -261,6 +261,7 @@ class Module(nn.Module):
                     'optim': optimizer.state_dict(),
                     'args': self.args,
                     'vocab': self.vocab,
+                    'total_train_loss' : total_train_loss,
                 }, fsave)
 
                 # write stats

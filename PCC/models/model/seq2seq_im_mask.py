@@ -189,7 +189,7 @@ class Module(Base):
             try:
                 feat_one = self._fill_feature_one(data_item, device, load_mask, load_frames)
                 if feat_one is None:
-                    self._keep_empty_in_batch(batch_feat, device)
+                    continue
                 else:
                     for feature_name, value in feat_one.items():
                         batch_feat[feature_name].append(value)
