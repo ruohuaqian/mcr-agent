@@ -217,7 +217,6 @@ class Module(nn.Module):
             valid_seen_stream = self.create_streaming_dataset(valid_seen, 'valid_seen')
             valid_unseen_stream = self.create_streaming_dataset(valid_unseen, 'valid_unseen')
 
-            batch_count = 0
             for batch, feat in self.streaming_iterate(epoch_train_stream, args.batch):
                 c_st += 1
                 try:
@@ -241,7 +240,6 @@ class Module(nn.Module):
                         self.summary_writer.add_scalar('train/loss', sum_loss, train_iter)
                     total_train_loss.append(float(sum_loss.detach().cpu()))
                     train_iter += len(batch)
-                    batch_count += 1
 
                 except Exception as e:
                     print(f"Error in batch processing: {e}")
