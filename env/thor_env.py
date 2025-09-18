@@ -122,6 +122,7 @@ class ThorEnv(Controller):
         self.heated_objects = set()
 
     def restore_scene(self, object_poses, object_toggles, dirty_and_empty):
+        # Re-initialize render & nav params (note: camelCase for visibilityDistance in 4.x)
         super().step(dict(
             action='Initialize',
             gridSize=constants.AGENT_STEP_SIZE / constants.RECORD_SMOOTHING_FACTOR,
@@ -134,88 +135,71 @@ class ThorEnv(Controller):
             makeAgentsVisible=False,
         ))
 
+        # Set poses (fast path). Fallback to per-object TeleportFull if unavailable.
         if object_poses:
             try:
                 super().step(dict(action='SetObjectPoses', objectPoses=object_poses))
             except ValueError as e:
-                # Fallback per-object TeleportFull (slower)
-                for p in object_poses:
-                    oid = p.get('objectId') or p.get('objectName')
-                    pos = p['position'];
-                    rot = p['rotation']
-                    super().step(dict(
-                        action='TeleportFull',
-                        objectId=oid,
-                        x=pos['x'], y=pos['y'], z=pos['z'],
-                        rotation=dict(x=0, y=rot['y'], z=0),  # horizon separate
-                        horizon=0,
-                        standing=True
-                    ))
+                if 'Invalid action' not in str(e):
+                    raise
+                # Fallback: per-object teleport (slower)
+                for pose in object_poses:
+                    # pose = {"objectName"/"objectId":..., "position":{x,y,z}, "rotation":{x,y,z}}
+                    kwargs = {'action': 'TeleportFull'}
+                    kwargs.update(pose)
+                    super().step(kwargs)
 
+        # 3) Toggles
+        # Expect object_toggles like: [{"objectId": "...", "isToggled": True/False}, ...]
+        if object_toggles:
+            try:
+                super().step(dict(action='SetObjectToggles', objectToggles=object_toggles))
+            except ValueError as e:
+                if 'Invalid action' not in str(e): raise
+                # Fallback: per-object SetObjectStates for toggleable
+                toggle_changes = [{"objectId": x["objectId"],
+                                   "stateChange": {"toggleable": True, "isToggled": bool(x["isToggled"])}}
+                                  for x in object_toggles]
+                if toggle_changes:
+                    super().step(dict(action='SetObjectStates', stateChanges=toggle_changes))
+
+
+        # {
+        #   "dirty":   ["objId1", ...],
+        #   "clean":   ["objId2", ...],
+        #   "filled":  ["objId3", ...],
+        #   "empty":   ["objId4", ...],
+        #   "open":    ["objId5", ...],
+        #   "closed":  ["objId6", ...]
+        # }
         state_changes = []
+        if dirty_and_empty:
+            for oid in dirty_and_empty.get("dirty", []):
+                state_changes.append({"objectId": oid, "stateChange": {"dirtyable": True, "isDirty": True}})
+            for oid in dirty_and_empty.get("clean", []):
+                state_changes.append({"objectId": oid, "stateChange": {"dirtyable": True, "isDirty": False}})
 
-        if isinstance(object_toggles, dict):
-            for oid, toggle in object_toggles.items():
-                state_changes.append({
-                    "objectId": oid,
-                    "stateChange": {"toggleable": True, "isToggled": bool(toggle)}
-                })
-        elif isinstance(object_toggles, list):
-            # already in some structured form; adapt if needed
-            for t in object_toggles:
-                if "objectId" in t and "isToggled" in t:
-                    state_changes.append({
-                        "objectId": t["objectId"],
-                        "stateChange": {"toggleable": True, "isToggled": bool(t["isToggled"])}
-                    })
+            for oid in dirty_and_empty.get("filled", []):
+                state_changes.append(
+                    {"objectId": oid, "stateChange": {"canFillWithLiquid": True, "isFilledWithLiquid": True}})
+            for oid in dirty_and_empty.get("empty", []):
+                state_changes.append(
+                    {"objectId": oid, "stateChange": {"canFillWithLiquid": True, "isFilledWithLiquid": False}})
 
-        # dirty / clean
-        d = dirty_and_empty or {}
-        for oid in d.get("dirty", []):
-            state_changes.append({"objectId": oid, "stateChange": {"dirtyable": True, "isDirty": True}})
-        for oid in d.get("clean", []):
-            state_changes.append({"objectId": oid, "stateChange": {"dirtyable": True, "isDirty": False}})
+            for oid in dirty_and_empty.get("open", []):
+                state_changes.append({"objectId": oid, "stateChange": {"openable": True, "isOpen": True}})
+            for oid in dirty_and_empty.get("closed", []):
+                state_changes.append({"objectId": oid, "stateChange": {"openable": True, "isOpen": False}})
 
-        #  empty / not_empty (liquid)
-        for oid in d.get("empty", []):
-            state_changes.append(
-                {"objectId": oid, "stateChange": {"canFillWithLiquid": True, "isFilledWithLiquid": False}})
-        for oid in d.get("not_empty", []):
-            state_changes.append(
-                {"objectId": oid, "stateChange": {"canFillWithLiquid": True, "isFilledWithLiquid": True}})
-
-        # Try the unified states API; fall back to older calls if missing
         if state_changes:
             try:
-                super().step(dict(action='SetObjectStates', SetObjectStates=state_changes))
+                super().step(dict(action='SetObjectStates', stateChanges=state_changes))
             except ValueError as e:
-                # Fallbacks: try legacy SetObjectToggles + per-object actions
-                if object_toggles:
-                    try:
-                        super().step(dict(action='SetObjectToggles', objectToggles=object_toggles))
-                    except ValueError:
-                        pass
-                # Per-object state actions as last resort
-                for oid in d.get("dirty", []):
-                    try:
-                        super().step(dict(action="DirtyObject", objectId=oid))
-                    except ValueError:
-                        pass
-                for oid in d.get("clean", []):
-                    try:
-                        super().step(dict(action="CleanObject", objectId=oid))
-                    except ValueError:
-                        pass
-                for oid in d.get("empty", []):
-                    try:
-                        super().step(dict(action="EmptyLiquidFromObject", objectId=oid))
-                    except ValueError:
-                        pass
-                for oid in d.get("not_empty", []):
-                    try:
-                        super().step(dict(action="FillObjectWithLiquid", objectId=oid))
-                    except ValueError:
-                        pass
+                if 'Invalid action' not in str(e):
+                    raise
+                # Final fallback: loop per change (slower, but robust)
+                for change in state_changes:
+                    super().step(dict(action='SetObjectStates', stateChanges=[change]))
 
     def set_task(self, traj, args, reward_type='sparse', max_episode_length=2000):
         '''
