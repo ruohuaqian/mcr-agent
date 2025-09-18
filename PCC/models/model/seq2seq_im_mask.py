@@ -173,7 +173,7 @@ class Module(Base):
 
         return feat
 
-    def streaming_featurize(self, data_stream, batch_size, load_mask=True, load_frames=True):
+    def cached_featurize(self, data_stream, batch_size, load_mask=True, load_frames=True):
         '''
         Tensorize and pad batch input - streaming version
         '''

@@ -259,7 +259,7 @@ class StreamingEvalTask(Eval):
         # extract language features
         # model.featurize([(traj_data, False)], action_high_order, load_mask=False)
         feat1 = cls.unwrap_to_feat(
-            model.streaming_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1, action_high_order, load_mask=False))
+            model.cached_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1, action_high_order, load_mask=False))
 
         # previous action for teacher-forcing during expert execution (None is used for initialization)
         prev_action = None
@@ -405,7 +405,7 @@ class StreamingEvalTask(Eval):
         nav_traj_data = copy.deepcopy(traj_data)
         cls.setup_scene(env, (nav_traj_data), r_idx, args, reward_type=reward_type)
 
-        mix_feat_subgoal_stream = model['subgoal'].streaming_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1,
+        mix_feat_subgoal_stream = model['subgoal'].cached_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1,
                                                                        load_mask=True)
         feat_subgoal = cls.unwrap_to_feat(mix_feat_subgoal_stream)
 
@@ -446,7 +446,7 @@ class StreamingEvalTask(Eval):
 
         cls.printing_log("changes", [model['nav'].vocab['action_high'].index2word(list(pred_subgoal.cpu().numpy()))])
         # exit()
-        mix_feat_obj_stream = model['object'].streaming_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1,
+        mix_feat_obj_stream = model['object'].cached_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1,
                                                                   pred_subgoal.cpu().numpy(),
                                                                   load_mask=True)
         feat_obj = cls.unwrap_to_feat(mix_feat_obj_stream)
@@ -456,7 +456,7 @@ class StreamingEvalTask(Eval):
         objects2find = [classes[o.item()] for o in pred_obj]
 
         # extract language features
-        mix_feat_stream = model['nav'].streaming_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1,
+        mix_feat_stream = model['nav'].cached_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1,
                                                            pred_subgoal.cpu().numpy(), objects2find,
                                                            load_mask=True)
         feat = cls.unwrap_to_feat(mix_feat_stream)

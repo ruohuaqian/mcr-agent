@@ -363,7 +363,7 @@ class Module(nn.Module):
     def featurize(self, batch):
         raise NotImplementedError()
 
-    def streaming_featurize(self, data_stream, batch_size):
+    def cached_featurize(self, data_stream, batch_size):
         raise NotImplementedError()
 
     def forward(self, feat, max_decode=100):
@@ -465,7 +465,7 @@ class Module(nn.Module):
         '''
         error_no = 0
         try:
-            yield from self.streaming_featurize(data_stream, batch_size)
+            yield from self.cached_featurize(data_stream, batch_size)
         except Exception as e:
             error_no += 1
             print(f"no. {error_no} of wrong trajs, {e}")
@@ -481,7 +481,7 @@ class Module(nn.Module):
             # 验证 seen
             valid_seen_loss = []
             for batch in self.streaming_iterate(valid_seen_stream, self.args.batch):
-                feat = self.streaming_featurize(batch)
+                feat = self.cached_featurize(batch)
                 out = self.forward(feat)
                 loss = self.compute_loss(out, batch, feat)
                 valid_seen_loss.append(sum(loss.values()).item())
@@ -489,7 +489,7 @@ class Module(nn.Module):
             # 验证 unseen
             valid_unseen_loss = []
             for batch in self.streaming_iterate(valid_unseen_stream, self.args.batch):
-                feat = self.streaming_featurize(batch)
+                feat = self.cached_featurize(batch)
                 out = self.forward(feat)
                 loss = self.compute_loss(out, batch, feat)
                 valid_unseen_loss.append(sum(loss.values()).item())

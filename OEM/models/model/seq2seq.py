@@ -314,7 +314,7 @@ class Module(nn.Module):
         '''
         error_no = 0
         try:
-            yield from self.streaming_featurize(data_stream, batch_size)
+            yield from self.cached_featurize(data_stream, batch_size)
         except Exception as e:
             error_no += 1
             print(f"no. {error_no} of wrong trajs, {e}")
@@ -355,7 +355,7 @@ class Module(nn.Module):
     def featurize(self, batch):
         raise NotImplementedError()
 
-    def streaming_featurize(self, data_stream, batch_size):
+    def cached_featurize(self, data_stream, batch_size):
         raise NotImplementedError()
 
     def forward(self, feat, max_decode=100):
