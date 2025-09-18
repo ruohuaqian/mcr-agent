@@ -79,8 +79,17 @@ while [[ $# -gt 0 ]]; do
     --batch) BATCH="$2"; shift 2;;
     --epoch) EPOCH="$2"; shift 2;;
     --lr) LR="$2"; shift 2;;
+     --zero_goal) ZERO_GOAL=1; shift;;
+    --zero_instr) ZERO_INSTR=1; shift;;
+    --lang_dropout) LANG_DROPOUT="$2"; shift 2;;
+    --input_dropout) INPUT_DROPOUT="$2"; shift 2;;
+    --vis_dropout) VIS_DROPOUT="$2"; shift 2;;
+    --hstate_dropout) HSTATE_DROPOUT="$2"; shift 2;;
     --dhid) DHID="$2"; shift 2;;
-    # ... Add other hyperparameter parsing here if needed ...
+    --panoramic) PANORAMIC=1; shift;;
+    --orientation) ORIENTATION=1; shift;;
+    --panoramic_concat) PANORAMIC_CONCAT=1; shift;;
+
 
     # Debugging
     --fast_epoch) FAST_EPOCH=1; shift;;

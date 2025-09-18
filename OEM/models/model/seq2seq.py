@@ -246,6 +246,7 @@ class Module(nn.Module):
                 except Exception as e:
                     print(f"Error in batch processing: {e}")
                     continue
+
             self.validate(valid_seen_stream, valid_unseen_stream, train_iter)
             # 保存检查点
             stats = {'epoch': epoch, 'batch': c_st}

@@ -680,6 +680,8 @@ class Module(Base):
         l_obj = feat['objnav'].cuda()
         obj_loss = F.cross_entropy(p_obj, l_obj)
         losses['objnav'] = obj_loss
+        if p_obj.numel() == 0:
+            print(f"[WARN] empty p_obj at step {step}")
 
         return losses
 
