@@ -175,10 +175,10 @@ class Module(nn.Module):
         # debugging: chose a small fraction of the dataset
         if self.args.dataset_fraction > 0:
             small_train_size = int(self.args.dataset_fraction * 0.7)
-            # small_valid_size = int((self.args.dataset_fraction * 0.3) / 2)
+            small_valid_size = int((self.args.dataset_fraction * 0.3) / 2)
             train = train[:small_train_size]
-            # valid_seen = valid_seen[:small_valid_size]
-            # valid_unseen = valid_unseen[:small_valid_size]
+            valid_seen = valid_seen[:small_valid_size]
+            valid_unseen = valid_unseen[:small_valid_size]
 
         # debugging: use to check if training loop works without waiting for full epoch
         if self.args.fast_epoch:
@@ -211,8 +211,8 @@ class Module(nn.Module):
             random.shuffle(train)
             c_st = 0
             epoch_train_stream = self.create_streaming_dataset(train)
-            valid_seen_stream = self.create_streaming_dataset(valid_seen)
-            valid_unseen_stream = self.create_streaming_dataset(valid_unseen)
+            valid_seen_stream = self.create_streaming_dataset(valid_seen,'valid_seen')
+            valid_unseen_stream = self.create_streaming_dataset(valid_unseen, 'valid_unseen')
             # 使用流式迭代器
             for batch, feat in self.streaming_iterate(epoch_train_stream, args.batch):
                 c_st += 1
@@ -264,7 +264,7 @@ class Module(nn.Module):
                     for k, v in stats[split].items():
                         self.summary_writer.add_scalar(split + '/' + k, v, train_iter)
             pprint.pprint(stats)
-    def create_streaming_dataset(self, task_list):
+    def create_streaming_dataset(self, task_list, split='train'):
         '''
         创建流式数据集
         '''
@@ -275,28 +275,29 @@ class Module(nn.Module):
                 task_path = task_info[0]['task']
                 repeat_idx = task_info[0].get('repeat_idx', 0)
                 swapColor = task_info[1]
+
             else:
                 task_path = task_info
                 repeat_idx = 0
                 swapColor = False
 
             # 数据增强：7种swapColor变体
-            task_data = self.load_streaming_task(task_path, repeat_idx, swapColor)
+            task_data = self.load_streaming_task(task_path, repeat_idx, swapColor, split)
             if task_data is not None:
                 yield task_data
 
-    def load_streaming_task(self, task_path, repeat_idx, swapColor):
+    def load_streaming_task(self, task_path, repeat_idx, swapColor, split='train'):
         json_filename = f"{task_path}/pp/ann_{repeat_idx}.json"
         json_path = cached_hf_path(self.args.huggingface_id, json_filename)
         with open(json_path, "r", encoding="utf-8") as f:
             ex = json.load(f)
 
         if swapColor == 0:
-            pt_filename = f"train/{task_path}/{self.feat_pt}"
+            pt_filename = f"{split}/{task_path}/{self.feat_pt}"
         elif swapColor in [1, 2]:
-            pt_filename = f"train/{task_path}/feat_conv_colorSwap{swapColor}_panoramic.pt"
+            pt_filename = f"{split}/{task_path}/feat_conv_colorSwap{swapColor}_panoramic.pt"
         else:
-            pt_filename = f"train/{task_path}/feat_conv_onlyAutoAug{swapColor - 2}_panoramic.pt"
+            pt_filename = f"{split}/{task_path}/feat_conv_onlyAutoAug{swapColor - 2}_panoramic.pt"
 
         pt_path = cached_hf_path(self.args.huggingface_id, pt_filename)
         im = torch.load(pt_path, map_location="cpu")
