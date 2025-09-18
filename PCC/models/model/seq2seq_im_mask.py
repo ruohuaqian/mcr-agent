@@ -234,8 +234,8 @@ class Module(Base):
         feat_one['lang_instr'] = lang_instr
 
         if len(lang_instr) != len(action_high_order):
-            feat_one.delete('lang_instr')
-            feat_one.delete('action_high_instr')
+            feat_one.pop('lang_instr', None)
+            feat_one.pop('action_high_instr', None)
         return feat_one
 
     # 张量化和填充（保持不变）
