@@ -166,8 +166,8 @@ class Module(nn.Module):
 
         # splits
         train_list = splits['train']
-        # valid_seen = splits['valid_seen']
-        # valid_unseen = splits['valid_unseen']
+        valid_seen = splits['valid_seen']
+        valid_unseen = splits['valid_unseen']
 
         train = [(s, False) for s in train_list]
         train = train + [(s, 1) for s in train_list] + [(s, 2) for s in train_list]
