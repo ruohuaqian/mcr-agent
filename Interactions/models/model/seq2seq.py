@@ -135,16 +135,6 @@ class Module(nn.Module):
                 total_train_loss.append(float(sum_loss))
                 train_iter += self.args.batch
 
-                if not (c_st % 2628):
-                    fsave = os.path.join(args.dout, f'net_epoch_{epoch}_{c_st}.pth')
-
-                    torch.save({
-                        'metric': {'epoch': epoch, 'c_st': c_st},  # stats,
-                        'model': self.state_dict(),
-                        'optim': optimizer.state_dict(),
-                        'args': self.args,
-                        'vocab': self.vocab,
-                    }, fsave)
 
             stats = {'epoch': epoch, }
 
@@ -248,7 +238,7 @@ class Module(nn.Module):
                 train_iter += args.batch
 
                 # save checkpoint
-                stats = {'epoch': epoch, c_st: c_st}
+                stats = {'epoch': epoch, 'batch': c_st}
 
                 # save the latest checkpoint
                 if args.save_every_epoch:

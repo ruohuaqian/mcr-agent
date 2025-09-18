@@ -238,7 +238,7 @@ class Module(nn.Module):
             #each epoch validation the loss
             self.validate(valid_seen_stream, valid_unseen_stream, train_iter)
                 # 保存检查点
-            stats = {'epoch': epoch, c_st: c_st}
+            stats = {'epoch': epoch, 'batch': c_st}
 
             # save the latest checkpoint
             if args.save_every_epoch:
@@ -398,6 +398,9 @@ class Module(nn.Module):
         return accuracy, final_loss
 
     def featurize(self, batch):
+        raise NotImplementedError()
+
+    def streaming_featurize(self, data_stream, batch_size):
         raise NotImplementedError()
 
     def forward(self, feat, max_decode=100):
