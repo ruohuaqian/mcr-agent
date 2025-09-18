@@ -13,7 +13,7 @@ from tqdm import trange, tqdm
 from Interactions.models.model import constants
 from torch.utils.data import DataLoader
 from datasets import Dataset, DatasetDict
-from huggingface_hub import hf_hub_url
+from huggingface_hub import hf_hub_download
 from huggingface_hub import login
 from functools import partial
 
@@ -283,29 +283,19 @@ class Module(nn.Module):
                 yield task_data
 
     def load_streaming_task(self, task_path, repeat_idx, swapColor):
-        '''
-        流式加载单个任务数据
-        '''
+        self.setup_hf_auth()
         try:
-            # 加载JSON数据
             json_filename = f"{task_path}/pp/ann_{repeat_idx}.json"
-            json_url = hf_hub_url(
+            json_path = hf_hub_download(
                 repo_id=self.args.huggingface_id,
                 filename=json_filename,
-                repo_type="dataset"
+                repo_type="dataset",
+                etag_timeout=30,
+                resume_download=True
             )
+            with open(json_path, "r", encoding="utf-8") as f:
+                ex = json.load(f)
 
-            json_response = requests.get(
-                json_url,
-                timeout=120,
-                stream=False
-            )
-            if json_response.status_code != 200:
-                return None
-
-            ex = json.loads(json_response.content.decode('utf-8'))
-
-            # 加载图像特征
             if swapColor == 0:
                 pt_filename = f"train/{task_path}/{self.feat_pt}"
             elif swapColor in [1, 2]:
@@ -313,33 +303,19 @@ class Module(nn.Module):
             else:
                 pt_filename = f"train/{task_path}/feat_conv_onlyAutoAug{swapColor - 2}_panoramic.pt"
 
-            pt_url = hf_hub_url(
+            pt_path = hf_hub_download(
                 repo_id=self.args.huggingface_id,
                 filename=pt_filename,
-                repo_type="dataset"
+                repo_type="dataset",
+                etag_timeout=60,
+                resume_download=True
             )
+            im = torch.load(pt_path, map_location="cpu")  # or your device mapping
 
-            pt_response = requests.get(
-                pt_url,
-                timeout=300,
-                stream=True
-            )
-            if pt_response.status_code != 200:
-                return None
-
-            with io.BytesIO(pt_response.content) as buffer:
-                im = torch.load(buffer)
-
-            return {
-                'ex': ex,
-                'im': im,
-                'task_path': task_path,
-                'repeat_idx': repeat_idx,
-                'swapColor': swapColor
-            }
-
+            return {'ex': ex, 'im': im, 'task_path': task_path,
+                    'repeat_idx': repeat_idx, 'swapColor': swapColor}
         except Exception as e:
-            print(f"Error loading task {task_path}: {e}")
+            print(f"[ERR] load {task_path} r{repeat_idx} c{swapColor}: {e}")
             return None
 
     def streaming_iterate(self, data_stream, batch_size):
