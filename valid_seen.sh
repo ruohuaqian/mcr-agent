@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# === 必须先设置你的 MCR 根目录 ===
+
 : "${MCR_ROOT:?Please export MCR_ROOT to the root of mcr-agent}"
 
-# === 只需改这里：OEM 模型路径 ===
+
 OEM_PATH="/content/drive/MyDrive/mcr-agent/exp/OEM/latest.pth"
 
-# === 不常改的固定配置 ===
+
 NAV_PATH="/content/drive/MyDrive/mcr-agent/exp/MasterPolicy/latest.pth"
 PICKUP_PATH="/content/drive/MyDrive/mcr-agent/exp/Interactions/PickupObject/latest.pth"
 PUT_PATH="/content/drive/MyDrive/mcr-agent/exp/Interactions/PutObject/latest.pth"
@@ -40,7 +40,7 @@ python eval/eval_seq2seq.py \
     --clean_model_path "$CLEAN_PATH" \
     --toggle_model_path "$TOGGLE_PATH" \
     --slice_model_path "$SLICE_PATH" \
-    --object_model_path "$OEM_PATH" \        # 👈 只需要改这一行
+    --object_model_path "$OEM_PATH" \
     --subgoal_model_path "$PCC_PATH" \
     --splits "$SPLITS" \
     --eval_split "$EVAL_SPLIT" \
