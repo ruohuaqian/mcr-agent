@@ -85,7 +85,7 @@ GPU_FLAG=$([ "$GPU" = "1" ] && echo "--gpu" || echo "")
 STREAM_FLAG=$([ "$USE_STREAMING" = "1" ] && echo "--use_streaming" || echo "")
 FREEZE_FLAG=$([ -n "$FREEZE" ] && echo "--freeze \"$FREEZE\"" || echo "")
 
-CMD="python -u train_seq2seq_stream.py \
+CMD="python -u models/train/train_seq2seq_stream.py \
   --seed $SEED \
   --huggingface_id $HF_ID \
   --splits $SPLITS \
