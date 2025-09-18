@@ -292,7 +292,7 @@ class Module(nn.Module):
             if task_data is not None:
                 yield task_data
 
-    def load_streaming_task(self, task_path, repeat_idx, swapColor, split):
+    def load_streaming_task(self, task_path, repeat_idx, swapColor, split='train'):
         json_filename = f"{task_path}/pp/ann_{repeat_idx}.json"
         json_path = cached_hf_path(self.args.huggingface_id, json_filename)
         with open(json_path, "r", encoding="utf-8") as f:
