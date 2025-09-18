@@ -462,16 +462,69 @@ class Module(Base):
         return action_emb
 
     def compute_loss(self, out, batch, feat):
-        '''
-        loss function for Seq2Seq agent
-        '''
-        losses = dict()
 
-        p_obj = out['out_sub']
-        l_obj = feat['action_high_order'].cuda()
-        # print(p_obj.shape, p_obj.device)
-        # print(l_obj.shape, l_obj.device)
-        obj_loss = F.cross_entropy(p_obj, l_obj)
+        import torch
+        import torch.nn.functional as F
+
+        losses = {}
+
+        p_obj = out['out_sub']  # logits
+        l_obj = feat['action_high_order']
+        device = p_obj.device
+        l_obj = l_obj.to(device).view(-1).long()
+
+        obj_mask = None
+        if 'obj_mask' in out:
+            obj_mask = out['obj_mask']
+        elif 'obj_mask' in feat:
+            obj_mask = feat['obj_mask']
+        if obj_mask is not None:
+            obj_mask = obj_mask.to(device).view(-1)
+
+
+        if p_obj.dim() == 3:
+            # assume dims are (T, D, C)
+            if p_obj.size(-1) < max(p_obj.size(0), p_obj.size(1)):
+
+                p_obj = p_obj.mean(dim=1)  # aggregate over directions
+            else:
+                p_obj = p_obj.transpose(1, 2).mean(dim=1)
+
+        if p_obj.dim() == 2:
+            N, C = p_obj.shape
+            if N == l_obj.numel() and C != l_obj.numel():
+                pass  # already (N, C)
+            elif C == l_obj.numel() and N != l_obj.numel():
+                p_obj = p_obj.transpose(0, 1)  # (C, N) -> (N, C)
+
+        # Re-read shapes
+        assert p_obj.dim() == 2, f"Expected 2D logits, got {p_obj.shape}"
+        N_logits, num_classes = p_obj.shape
+
+
+        valid_lbl = (l_obj >= 0)
+
+        if obj_mask is not None and obj_mask.numel() == l_obj.numel():
+            shared_mask = valid_lbl & obj_mask.bool()
+        else:
+            shared_mask = valid_lbl
+
+
+        l_sel = l_obj[shared_mask]
+        N_target = l_sel.numel()
+
+        if N_logits != N_target:
+
+            N_min = min(N_logits, N_target)
+            print(f"[WARN compute_loss] p_obj N={N_logits}, l_obj(valid) N={N_target}. Aligning to {N_min}.")
+            if N_target != N_min:
+                l_sel = l_sel[:N_min]
+            p_obj = p_obj[:N_min]
+
+
+        assert p_obj.size(0) == l_sel.numel(), f"After alignment: logits N={p_obj.size(0)} vs labels N={l_sel.numel()}"
+
+        obj_loss = F.cross_entropy(p_obj, l_sel)  # labels already long + >=0
         losses['action_high_order'] = obj_loss
 
         return losses

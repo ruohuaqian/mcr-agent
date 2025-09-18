@@ -256,8 +256,6 @@ class Module(nn.Module):
                 'optim': optimizer.state_dict(),
                 'args': self.args,
                 'vocab': self.vocab,
-                'total_train_loss': total_train_loss,
-
             }, fsave)
 
             # write stats
@@ -469,7 +467,6 @@ class Module(nn.Module):
         except Exception as e:
             error_no += 1
             print(f"no. {error_no} of wrong trajs, {e}")
-            raise e
 
     def validate(self, valid_seen_stream, valid_unseen_stream, global_step):
         '''
