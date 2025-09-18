@@ -459,16 +459,18 @@ class Module(nn.Module):
             valid_seen_loss = []
             for batch, feat in self.streaming_iterate(valid_seen_stream, self.args.batch):
                 feat = self.cached_featurize(batch, self.args.batch)
-                out = self.forward(feat)
-                loss = self.compute_loss(out, batch, feat)
+                for f in feat:
+                    out = self.forward(f)
+                    loss = self.compute_loss(out, batch, feat)
                 valid_seen_loss.append(sum(loss.values()).item())
 
             # 验证 unseen
             valid_unseen_loss = []
             for batch, feat in self.streaming_iterate(valid_unseen_stream, self.args.batch):
                 feat = self.cached_featurize(batch, self.args.batch)
-                out = self.forward(feat)
-                loss = self.compute_loss(out, batch, feat)
+                for f in feat:
+                    out = self.forward(f)
+                    loss = self.compute_loss(out, batch, f)
                 valid_unseen_loss.append(sum(loss.values()).item())
 
         # 记录验证结果
