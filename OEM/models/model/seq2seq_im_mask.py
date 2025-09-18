@@ -417,7 +417,6 @@ class Module(Base):
 
         except Exception as e:
             print(f"Error processing task: {e}")
-            raise e
             return None
         return feat_one
 

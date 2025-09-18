@@ -318,7 +318,6 @@ class Module(nn.Module):
         except Exception as e:
             error_no += 1
             print(f"no. {error_no} of wrong trajs, {e}")
-            raise e
 
 
     def run_pred(self, dev, args=None, name='dev', iter=0):
