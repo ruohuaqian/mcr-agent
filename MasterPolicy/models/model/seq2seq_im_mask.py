@@ -285,7 +285,7 @@ class Module(Base):
             try:
                 feat_one = self._fill_feature_one(data_item, device, action_higher_order, object2find, load_mask, load_frames)
                 if feat_one is None:
-                    self._keep_empty_in_batch(batch_feat, device)
+                    continue
                 else:
                     for feature_name, value in feat_one.items():
                         batch_feat[feature_name].append(value)
@@ -450,13 +450,13 @@ class Module(Base):
                             feat_one['frames_down'] = im[3][valid_indices]  # down
                             feat_one['frames_right'] = im[4][valid_indices]  # right
                         else:
-                            self._add_empty_image_features(feat_one, device)
+                            return None
 
                     except IndexError as e:
                         print(f"Image index error: {e}")
-                        feat_one = self._add_empty_image_features(feat_one, device)
+                        return None
                 else:
-                    feat_one =self._add_empty_image_features(feat_one, device)
+                    return None
 
                 if self.orientation:
                     feat_one = self._add_orientation_features(feat_one, device)
@@ -466,30 +466,6 @@ class Module(Base):
             print(f"Error processing task: {repr(e)}")
             return None
         return feat_one
-
-    def _add_empty_image_features(self, feat_one, device):
-        empty_tensor = torch.tensor([], device=device, dtype=torch.float)
-        for view in ['frames', 'frames_left', 'frames_up', 'frames_down', 'frames_right']:
-            feat_one[view] = empty_tensor
-        return feat_one
-
-    def _keep_empty_in_batch(self, feat, device):
-        '''generate a empty feature to batch feature'''
-        # 图像特征
-        empty_tensor = torch.tensor([], device=device, dtype=torch.float)
-        for view in ['frames', 'frames_left', 'frames_up', 'frames_down', 'frames_right']:
-            feat[view].append(empty_tensor)
-
-        # 其他特征
-        empty_lists = ['action_high', 'action_high_order', 'lang_goal', 'lang_instr',
-                       'action_low', 'action_low_manip', 'obj_high_indices',
-                       'subgoals_completed', 'subgoal_progress', 'objnav', 'action_low_mask_label']
-
-        for key in empty_lists:
-            if key not in feat:
-                feat[key] = []
-            feat[key].append([] if key != 'subgoals_completed' else np.array([]))
-        return feat
 
     def _tensorize_and_pad(self, feat, device):
         for k, v in feat.items():
