@@ -288,7 +288,7 @@ class Module(nn.Module):
                 swapColor = False
 
             # 数据增强：7种swapColor变体
-            task_data = self.load_streaming_task(task_path, repeat_idx, swapColor)
+            task_data = self.load_streaming_task(task_path, repeat_idx, swapColor, split)
             if task_data is not None:
                 yield task_data
 
