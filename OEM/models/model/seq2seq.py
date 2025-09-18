@@ -383,6 +383,7 @@ class Module(nn.Module):
         :param data: The list of task dictionaries from your splits file.
         :return: A dictionary with debug information.
         '''
+        num_proc = 0
         print(f"Starting debug data generation for {len(data)} tasks using {num_proc} processes...")
 
         # 1. Convert your list of tasks into a Hugging Face Dataset in memory
@@ -395,9 +396,9 @@ class Module(nn.Module):
 
         def _fetch_and_extract_info(task):
             # Fetch the full JSON from the Hub
-            ex = load_task_json_from_hub(self.args.huggingface_id, task, self.args.pp_folder)
+            ex = self.load_task_json_from_hub(self.args.huggingface_id, task, self.args.pp_folder)
 
-            i = get_task_and_ann_id(ex)
+            i = self.get_task_and_ann_id(ex)
             # ----------------------------------------------------------------
 
             # Extract the ground truth information

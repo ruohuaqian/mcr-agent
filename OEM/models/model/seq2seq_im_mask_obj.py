@@ -497,8 +497,8 @@ class Module(Base):
         '''
         append segmented instr language and low-level actions into single sequences
         '''
-        if len(action_high_order) > len(ex['num']['lang_instr']):
-            action_high_order = action_high_order[:len(ex['num']['lang_instr'])]
+        if len(action_high_order) > len(feat['num']['lang_instr']):
+            action_high_order = action_high_order[:len(feat['num']['lang_instr'])]
 
         # assert (len(action_high_order) == len(feat['num']['lang_instr']))
 

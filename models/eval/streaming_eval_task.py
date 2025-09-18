@@ -371,7 +371,7 @@ class StreamingEvalTask(Eval):
 
                     epsilon = 1
                     if od_score < epsilon:
-                        return False, t, fails, total_actions, total_frames, error
+                        return False, t, fails, total_actions, total_frames, err
 
                     if not t_success:
                         fails += 1
@@ -388,7 +388,7 @@ class StreamingEvalTask(Eval):
                     m_prev_action = action
 
         t += 1
-        return False, t, fails, total_actions, total_frames, error
+        return False, t, fails, total_actions, total_frames, err
 
     @classmethod
     def evaluate_streaming(cls, env, model, r_idx, resnet, data, args, lock, successes, failures, results, task):
