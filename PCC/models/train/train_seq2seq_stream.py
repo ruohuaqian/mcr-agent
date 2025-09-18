@@ -88,7 +88,7 @@ if __name__ == '__main__':
     vocab_path = hf_hub_download(
         repo_id="byeonghwikim/abp_dataset",
         filename="%s.vocab" % args.pp_folder,
-        repo_type="dataset"
+        repo_type="dataset",
     )
     print(f"Vocab successfully downloaded to: {vocab_path}")
     vocab = torch.load(vocab_path)
