@@ -269,7 +269,7 @@ class Module(Base):
 
         yield feat
 
-    def cached_featurize(self, data_stream, batch_size, action_higher_order=None, object2find=classes, load_mask=True, load_frames=True):
+    def cached_featurize(self, data_stream, batch_size, action_high_order=None, object2find=classes, load_mask=True, load_frames=True):
         '''
         Tensorize and pad batch input - streaming version
         '''
@@ -283,7 +283,7 @@ class Module(Base):
             if data_item is None:
                 continue
             try:
-                feat_one = self._fill_feature_one(data_item, device, action_higher_order, object2find, load_mask, load_frames)
+                feat_one = self._fill_feature_one(data_item, device, action_high_order, object2find, load_mask, load_frames)
                 if feat_one is None:
                     continue
                 else:
@@ -309,9 +309,8 @@ class Module(Base):
             final_batch_feat = self._tensorize_and_pad(batch_feat, device)
             yield batch, final_batch_feat
 
-    def _fill_feature_one(self, data_item, device, action_higher_order=None, object2find=classes, load_mask=True, load_frames=True):
+    def _fill_feature_one(self, data_item, device, action_high_order=None, object2find=classes, load_mask=True, load_frames=True):
         feat_one = dict()
-
 
         ex = data_item['ex']
         im = data_item['im']
@@ -319,7 +318,7 @@ class Module(Base):
             if action_higher_order is None:
                 action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
             else:
-                action_high_order = action_higher_order
+                action_high_order = action_high_order
 
             low_to_high_idx = ex['num']['low_to_high_idx']
             action_high = action_high_order[low_to_high_idx]

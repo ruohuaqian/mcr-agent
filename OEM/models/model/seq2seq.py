@@ -246,22 +246,22 @@ class Module(nn.Module):
                     continue
 
             # 保存检查点
-            stats = {'epoch': epoch}
+            stats = {'epoch': epoch, 'batch': c_st}
 
-            if self.args.save_every_epoch:
-                filename = f'net_epoch_{epoch}.pth'
+            # save the latest checkpoint
+            if args.save_every_epoch:
+                fsave = os.path.join(args.dout, 'net_epoch_%d.pth' % epoch)
             else:
-                filename = 'latest.pth'
-            checkpoint = {
-                'metric': {'epoch': epoch, 'batch_count': batch_count},
+                fsave = os.path.join(args.dout, 'latest.pth')
+            torch.save({
+                'metric': stats,  # stats,
                 'model': self.state_dict(),
                 'optim': optimizer.state_dict(),
                 'args': self.args,
                 'vocab': self.vocab,
                 'total_train_loss': total_train_loss,
-            }
+            }, fsave)
 
-            torch.save(checkpoint, os.path.join(dout_path, filename))
 
             # write stats
             for split in stats.keys():

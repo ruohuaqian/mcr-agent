@@ -211,7 +211,7 @@ class Module(nn.Module):
         train_iter, valid_seen_iter, valid_unseen_iter = 0, 0, 0
 
         # 训练循环
-        for epoch in range(args.epoch):
+        for epoch in trange(0, args.epoch, desc='epoch'):
             m_train = collections.defaultdict(list)
             self.train()
             self.adjust_lr(optimizer, args.lr, epoch, decay_epoch=args.decay_epoch)

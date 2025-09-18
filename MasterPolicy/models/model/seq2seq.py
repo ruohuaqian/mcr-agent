@@ -248,7 +248,7 @@ class Module(nn.Module):
                     print(f"Error in batch processing: {repr(e)}")
 
             # 保存检查点
-            stats = {'epoch': epoch, c_st:c_st}
+            stats = {'epoch': epoch, 'batch': c_st}
 
             # save the latest checkpoint
             if args.save_every_epoch:
