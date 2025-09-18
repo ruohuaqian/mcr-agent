@@ -17,6 +17,12 @@ import requests
 import io
 import json
 from tqdm import trange
+from functools import lru_cache
+
+@lru_cache(maxsize=8192)
+def cached_hf_path(repo_id, filename):
+    return hf_hub_download(repo_id=repo_id, filename=filename, repo_type="dataset", resume_download=True)
+
 
 class Module(nn.Module):
 
@@ -286,40 +292,21 @@ class Module(nn.Module):
                 yield task_data
 
     def load_streaming_task(self, task_path, repeat_idx, swapColor):
-        self.setup_hf_auth()
-        try:
-            json_filename = f"{task_path}/pp/ann_{repeat_idx}.json"
-            json_path = hf_hub_download(
-                repo_id=self.args.huggingface_id,
-                filename=json_filename,
-                repo_type="dataset",
-                etag_timeout=30,
-                resume_download=True
-            )
-            with open(json_path, "r", encoding="utf-8") as f:
-                ex = json.load(f)
+        json_filename = f"{task_path}/pp/ann_{repeat_idx}.json"
+        json_path = cached_hf_path(self.args.huggingface_id, json_filename)
+        with open(json_path, "r", encoding="utf-8") as f:
+            ex = json.load(f)
 
-            if swapColor == 0:
-                pt_filename = f"train/{task_path}/{self.feat_pt}"
-            elif swapColor in [1, 2]:
-                pt_filename = f"train/{task_path}/feat_conv_colorSwap{swapColor}_panoramic.pt"
-            else:
-                pt_filename = f"train/{task_path}/feat_conv_onlyAutoAug{swapColor - 2}_panoramic.pt"
+        if swapColor == 0:
+            pt_filename = f"train/{task_path}/{self.feat_pt}"
+        elif swapColor in [1, 2]:
+            pt_filename = f"train/{task_path}/feat_conv_colorSwap{swapColor}_panoramic.pt"
+        else:
+            pt_filename = f"train/{task_path}/feat_conv_onlyAutoAug{swapColor - 2}_panoramic.pt"
 
-            pt_path = hf_hub_download(
-                repo_id=self.args.huggingface_id,
-                filename=pt_filename,
-                repo_type="dataset",
-                etag_timeout=60,
-                resume_download=True
-            )
-            im = torch.load(pt_path, map_location="cpu")  # or your device mapping
-
-            return {'ex': ex, 'im': im, 'task_path': task_path,
-                    'repeat_idx': repeat_idx, 'swapColor': swapColor}
-        except Exception as e:
-            print(f"[ERR] load {task_path} r{repeat_idx} c{swapColor}: {e}")
-            return None
+        pt_path = cached_hf_path(self.args.huggingface_id, pt_filename)
+        im = torch.load(pt_path, map_location="cpu")
+        return {'ex': ex, 'im': im, 'task_path': task_path, 'repeat_idx': repeat_idx, 'swapColor': swapColor}
 
     def streaming_iterate(self, data_stream, batch_size):
         '''
