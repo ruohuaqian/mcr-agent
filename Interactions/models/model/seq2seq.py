@@ -16,6 +16,13 @@ from datasets import Dataset, DatasetDict
 from huggingface_hub import hf_hub_download
 from huggingface_hub import login
 from functools import partial
+from functools import lru_cache
+from huggingface_hub import hf_hub_download
+
+@lru_cache(maxsize=8192)
+def cached_hf_path(repo_id, filename):
+    return hf_hub_download(repo_id=repo_id, filename=filename, repo_type="dataset", resume_download=True)
+
 
 classes = [0] + constants.OBJECTS + ['AppleSliced', 'ShowerCurtain', 'TomatoSliced', 'LettuceSliced', 'Lamp',
                                      'ShowerHead', 'EggCracked', 'BreadSliced', 'PotatoSliced', 'Faucet']
@@ -282,12 +289,6 @@ class Module(nn.Module):
             if task_data is not None:
                 yield task_data
 
-    from functools import lru_cache
-    from huggingface_hub import hf_hub_download
-
-    @lru_cache(maxsize=8192)
-    def cached_hf_path(repo_id, filename):
-        return hf_hub_download(repo_id=repo_id, filename=filename, repo_type="dataset", resume_download=True)
 
     def load_streaming_task(self, task_path, repeat_idx, swapColor):
         json_filename = f"{task_path}/pp/ann_{repeat_idx}.json"
