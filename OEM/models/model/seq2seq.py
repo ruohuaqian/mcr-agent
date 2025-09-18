@@ -242,7 +242,21 @@ class Module(nn.Module):
 
             # 保存检查点
             stats = {'epoch': epoch}
-            self.save_checkpoint(epoch, batch_count, optimizer, args.dout)
+
+            if self.args.save_every_epoch:
+                filename = f'net_epoch_{epoch}.pth'
+            else:
+                filename = 'latest.pth'
+            checkpoint = {
+                'metric': {'epoch': epoch, 'batch_count': batch_count},
+                'model': self.state_dict(),
+                'optim': optimizer.state_dict(),
+                'args': self.args,
+                'vocab': self.vocab,
+                'total_train_loss': total_train_loss,
+            }
+
+            torch.save(checkpoint, os.path.join(dout_path, filename))
 
             # write stats
             for split in stats.keys():
@@ -341,27 +355,6 @@ class Module(nn.Module):
             error_no += 1
             print(f"no. {error_no} of wrong trajs, {e}")
             raise e
-
-
-
-    def save_checkpoint(self, epoch, batch_count, optimizer, dout_path):
-        '''
-        保存检查点
-        '''
-        if self.args.save_every_epoch:
-            filename = f'net_epoch_{epoch}.pth'
-        else:
-            filename = 'latest.pth'
-        checkpoint = {
-                'metric': {'epoch': epoch, 'batch_count': batch_count},
-                'model': self.state_dict(),
-                'optim': optimizer.state_dict(),
-                'args': self.args,
-                'vocab': self.vocab,
-                'total_train_loss': total_train_loss,
-        }
-
-        torch.save(checkpoint, os.path.join(dout_path, filename))
 
 
     def run_pred(self, dev, args=None, name='dev', iter=0):
