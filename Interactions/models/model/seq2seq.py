@@ -379,7 +379,7 @@ class Module(nn.Module):
     def featurize(self, batch):
         raise NotImplementedError()
 
-    def cached_featurize(self, data_stream, batch_size):
+    def cached_featurize(self, data_stream, batch_size, **kwargs):
         raise NotImplementedError()
 
     def forward(self, feat, max_decode=100):
