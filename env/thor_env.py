@@ -122,9 +122,9 @@ class ThorEnv(Controller):
         self.heated_objects = set()
 
     def restore_scene(self, object_poses, object_toggles, dirty_and_empty):
-        # Re-initialize render & nav params (note: camelCase for visibilityDistance in 4.x)
+
         super().step(dict(
-            action='Initialize',
+            action="Initialize",
             gridSize=constants.AGENT_STEP_SIZE / constants.RECORD_SMOOTHING_FACTOR,
             cameraY=constants.CAMERA_HEIGHT_OFFSET,
             renderImage=constants.RENDER_IMAGE,
@@ -135,49 +135,28 @@ class ThorEnv(Controller):
             makeAgentsVisible=False,
         ))
 
-        # Set poses (fast path). Fallback to per-object TeleportFull if unavailable.
         if object_poses:
-            try:
-                super().step(dict(action='SetObjectPoses', objectPoses=object_poses))
-            except ValueError as e:
-                if 'Invalid action' not in str(e):
-                    raise
-                # Fallback: per-object teleport (slower)
-                for pose in object_poses:
-                    # pose = {"objectName"/"objectId":..., "position":{x,y,z}, "rotation":{x,y,z}}
-                    kwargs = {'action': 'TeleportFull'}
-                    kwargs.update(pose)
-                    super().step(kwargs)
+            super().step(dict(action="SetObjectPoses", objectPoses=object_poses))
 
-        # 3) Toggles
-        # Expect object_toggles like: [{"objectId": "...", "isToggled": True/False}, ...]
         if object_toggles:
-            try:
-                super().step(dict(action='SetObjectToggles', objectToggles=object_toggles))
-            except ValueError as e:
-                if 'Invalid action' not in str(e): raise
-                # Fallback: per-object SetObjectStates for toggleable
-                toggle_changes = [{"objectId": x["objectId"],
-                                   "stateChange": {"toggleable": True, "isToggled": bool(x["isToggled"])}}
-                                  for x in object_toggles]
-                if toggle_changes:
-                    super().step(dict(action='SetObjectStates', stateChanges=toggle_changes))
+            super().step(dict(action="SetObjectToggles", objectToggles=object_toggles))
 
-        state_changes = []
         if dirty_and_empty:
-            state_changes.append({
-                "objectId": "all",  # or enumerate objects separately
-                "stateChange": {"dirtyable": True, "isDirty": False}
-            })
-        if state_changes:
-            try:
-                super().step(dict(action='SetObjectStates', stateChanges=state_changes))
-            except ValueError as e:
-                if 'Invalid action' not in str(e):
-                    raise
-                # Final fallback: loop per change (slower, but robust)
-                for change in state_changes:
-                    super().step(dict(action='SetObjectStates', stateChanges=[change]))
+            objs = super().last_event.metadata["objects"]
+            for obj in objs:
+                oid = obj["objectId"]
+                if obj.get("dirtyable", False):
+                    super().step(dict(
+                        action="SetObjectStates",
+                        stateChanges=[{"objectId": oid,
+                                       "stateChange": {"dirtyable": True, "isDirty": False}}]
+                    ))
+                if obj.get("canFillWithLiquid", False):
+                    super().step(dict(
+                        action="SetObjectStates",
+                        stateChanges=[{"objectId": oid,
+                                       "stateChange": {"canFillWithLiquid": True, "isFilledWithLiquid": False}}]
+                    ))
 
     def set_task(self, traj, args, reward_type='sparse', max_episode_length=2000):
         '''
