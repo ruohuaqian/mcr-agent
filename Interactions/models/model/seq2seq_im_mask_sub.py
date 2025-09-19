@@ -365,7 +365,387 @@ class Module(Base):
                 feat[k] = pad_seq
 
         return feat
+    def cached_featurize(self, data_stream, batch_size, action_high_order=None, load_mask=True, load_frames=True):
+        '''
+        Tensorize and pad batch input - streaming version
+        '''
+        device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
 
+        batch_feat = collections.defaultdict(list)
+        batch = []
+
+        for data_item in data_stream:
+            # jump to empty data
+            if data_item is None:
+                continue
+            try:
+                feat_one = self._fill_feature_one(data_item, device, load_mask, load_frames)
+                if feat_one is None:
+                    continue
+                else:
+                    for feature_name, value in feat_one.items():
+                        batch_feat[feature_name].append(value)
+
+                batch.append(data_item)
+
+                if len(batch) == batch_size:
+                    # Tensorize and pad the full batch
+                    final_batch_feat = self._tensorize_and_pad(batch_feat, device)
+                    yield batch, final_batch_feat
+
+                    batch_feat = collections.defaultdict(list)
+                    batch = []
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print("Skipping a problematic data item due to error: {}".format(repr(e)))
+
+        if batch:
+            final_batch_feat = self._tensorize_and_pad(batch_feat, device)
+            yield batch, final_batch_feat
+
+    def _fill_feature_one(self, data_item, device, load_mask=True, load_frames=True):
+        feat_one = dict()
+
+        ex = data_item['ex']
+        im = data_item['im']
+        try:
+            # 辅助特征提取
+            action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
+            low_to_high_idx = ex['num']['low_to_high_idx']
+            action_high = action_high_order[low_to_high_idx]
+
+            feat_one['action_high'] = action_high
+            feat_one['action_high_order'] = action_high_order
+
+            # GotoLocation 验证
+            val_action_high = (
+                    action_high == self.vocab['action_high'].word2index('GotoLocation', train=False)).astype(
+                np.int64)
+            v = 0
+            while v < (len(val_action_high) - 1):
+                if (val_action_high[v] - val_action_high[v + 1]) == 1:
+                    val_action_high[v + 1] = 1
+                    v += 1
+                v += 1
+            val_action_high[-1] = 1
+
+            # 序列化语言动作
+            self.serialize_lang_action(ex, action_high_order)
+
+            # 子目标分析
+            subgoal_analysis = self.args.subgoal_analysis
+            alow_list = [a['action'] for a in ex['num']['action_low']]
+            sub_action_high = (
+                    action_high == self.vocab['action_high'].word2index(subgoal_analysis, train=False)).astype(
+                np.int64)
+            sub_actions = np.array(alow_list)[sub_action_high.nonzero()[0].astype(int)]
+
+            # 语言处理 - 修复 inhomogeneous shape 问题
+            lang_goal, lang_instr = ex['num']['lang_goal'], ex['num']['lang_instr']
+            lang_instr_sep = ex['num']['lang_instr_sep']
+
+            lang_goal = self.zero_input(lang_goal) if self.args.zero_goal else lang_goal
+            lang_instr = self.zero_input(lang_instr) if self.args.zero_instr else lang_instr
+            lang_instr_sep = self.zero_input(lang_instr_sep) if self.args.zero_instr else lang_instr_sep
+
+            feat_one['lang_goal'] = lang_goal
+            feat_one['lang_instr'] = lang_instr
+
+            sub_indices = (
+                np.array(action_high_order == self.vocab['action_high'].word2index(subgoal_analysis)).astype(
+                    int).nonzero()[0])
+
+            subgoal_lang = [lang_instr_sep[i] for i in sub_indices]  # 改用列表推导式
+
+            feat_one['sub_indices'] = list(sub_indices)
+
+            # 动作处理
+            alow = []
+            alow_manip = []
+            obj_high_indices = []
+
+            for ia, a in enumerate(ex['num']['action_low']):
+                if val_action_high[ia] == 1 and a['action'] in self.vocab['action_low'].word2index(
+                        ['<<pad>>', '<<seg>>', '<<stop>>', 'LookDown_15', 'LookUp_15', 'RotateLeft_90',
+                         'RotateRight_90', 'MoveAhead_25'], train=False):
+                    alow.append(a['action'])
+                elif val_action_high[ia] == 1:
+                    alow.append(self.vocab['action_low'].word2index('Manipulate', train=False))
+
+                if not (a['action'] in self.vocab['action_low'].word2index(
+                        ['<<pad>>', '<<seg>>', '<<stop>>', 'LookDown_15', 'LookUp_15', 'RotateLeft_90',
+                         'RotateRight_90', 'MoveAhead_25'], train=False)):
+                    alow_manip.append(a['action'])
+                    obj_high_indices.append(low_to_high_idx[ia])
+
+            feat_one['action_low'] = alow
+            feat_one['action_low_manip'] = alow_manip
+            feat_one['obj_high_indices'] = obj_high_indices
+
+            # 辅助损失
+            if self.args.subgoal_aux_loss_wt > 0:
+                completed_indices = val_action_high.nonzero()[0].astype(int)
+                if len(completed_indices) > 0:
+                    subgoals_completed = np.array(ex['num']['low_to_high_idx'])[
+                                             completed_indices] / self.max_subgoals
+                    feat_one['subgoals_completed'] = subgoals_completed
+                else:
+                    feat_one['subgoals_completed'] = np.array([])
+
+            if self.args.pm_aux_loss_wt > 0:
+                num_actions = len(alow)
+                if num_actions > 0:
+                    subgoal_progress = [(i + 1) / float(num_actions) for i in range(num_actions)]
+                    feat_one['subgoal_progress'] = subgoal_progress
+                else:
+                    feat_one['subgoal_progress'] = []
+
+            # 对象导航
+            obj_list = [self.vocab['objnav'].word2index('<<nav>>')]
+            high_idx = 0
+            if load_mask:
+                indices = []
+
+                for a in ex['plan']['low_actions']:
+                    if a['api_action']['action'] in ['MoveAhead', 'LookUp', 'LookDown', 'RotateRight', 'RotateLeft']:
+                        if a['high_idx'] == (high_idx + 1):
+                            obj_list.append(self.vocab['objnav'].word2index('<<nav>>', train=False))
+                            high_idx += 1
+                        continue
+
+                    if a['api_action']['action'] == 'PutObject':
+                        label = a['api_action']['receptacleObjectId'].split('|')
+                    else:
+                        label = a['api_action']['objectId'].split('|')
+
+                    # 修复: 处理可能的索引错误
+                    try:
+                        class_name = label[4].split('_')[0] if len(label) >= 5 else label[0]
+                        indices.append(classes.index(class_name))
+                    except (IndexError, ValueError):
+                        # 如果找不到类别，使用默认值
+                        indices.append(0)  # 或者使用一个默认的类别索引
+
+                    if a['high_idx'] == (high_idx + 1):
+                        try:
+                            class_name = (label[4].split('_')[0] if len(label) >= 5 else label[0]).lower()
+                            obj_list.append(self.vocab['objnav'].word2index(class_name, train=False))
+                        except:
+                            # 如果找不到对象，使用导航标记
+                            obj_list.append(self.vocab['objnav'].word2index('<<nav>>', train=False))
+                        high_idx += 1
+
+                new_obj_list = [obj_list[o + 1] for o, obj in enumerate(obj_list) if
+                                (obj == self.vocab['objnav'].word2index('<<nav>>'))]
+                feat_one['objnav'] = new_obj_list
+                feat_one['action_low_mask_label'] = indices
+
+            # 子目标帧处理
+            if len(sub_actions) > 0:
+                sah = []
+                for k, g in groupby(enumerate(sub_action_high.nonzero()[0]), lambda ix: ix[0] - ix[1]):
+                    sah.append(np.array(list(map(itemgetter(1), g))))
+
+                # 使用流式加载的图像数据
+                sub_frames_high = np.copy(sub_action_high)
+                for sfh in range(1, len(sub_frames_high)):
+                    if sub_action_high[sfh] < sub_action_high[sfh - 1]:
+                        sub_frames_high[sfh] = 1
+
+                if len(im) >= 3:  # 确保有足够的图像数据
+                    sub_frames = im[2][sub_frames_high.nonzero()[0]]
+                else:
+                    print(f"[WARN] Insufficient image data for task {data_item['task_path']}")
+                    return None
+
+                sac_ind = 0
+                sfr_ind = 0
+                for sii, s in enumerate(sah):
+                    # 修复: 处理可能的空数组
+                    if len(s) == 0:
+                        continue
+
+                    so = np.array(indices)[
+                        (np.array(obj_high_indices) == np.array(low_to_high_idx)[s][0]).astype(int).nonzero()[0]]
+
+                    # 修复: 确保子目标语言存在
+                    if sii < len(subgoal_lang):
+                        current_subgoal_lang = subgoal_lang[sii]
+                    else:
+                        current_subgoal_lang = []  # 或者使用默认值
+
+                    feat_one['sub_objs'] = so
+                    feat_one['sub_actions'] = list(sub_actions[sac_ind:sac_ind + len(s)]) + [self.stop_token]
+                    feat_one['sub_frames'] = sub_frames[sfr_ind:sfr_ind + len(s) + 1]
+                    feat_one['sub_lang'] = current_subgoal_lang
+
+                    sac_ind += len(s)
+                    sfr_ind += (len(s) + 1)
+                if self.orientation:
+                    feat_one = self._add_orientation_features(feat_one, device)
+        except Exception as e:
+            print(f"[ERROR] Error processing task {data_item.get('task_path', 'unknown')}: {e}")
+            import traceback
+            traceback.print_exc()
+        return feat_one
+
+    def _tensorize_and_pad(self, feat, device):
+        '''
+        张量化和填充逻辑 - 修复版
+        '''
+        for k, v in feat.items():
+            try:
+                if k in {'lang_goal', 'sub_lang'}:
+                    # 修复: 处理可能的空列表
+                    if not v or all(len(item) == 0 for item in v):
+                        feat[k] = {'seqs': [], 'emb': None, 'pi': None, 'seq_len': np.array([])}
+                        continue
+
+                    seqs = [torch.tensor(vv, device=device) for vv in v if len(vv) > 0]
+                    if not seqs:
+                        feat[k] = {'seqs': [], 'emb': None, 'pi': None, 'seq_len': np.array([])}
+                        continue
+
+                    pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+                    seq_lengths = np.array([len(vv) for vv in v if len(vv) > 0])
+                    embed_seq = self.emb_word(pad_seq)
+                    packed_input = pack_padded_sequence(embed_seq, seq_lengths, batch_first=True, enforce_sorted=False)
+                    feat[k] = {'seqs': seqs, 'emb': embed_seq, 'pi': packed_input, 'seq_len': seq_lengths}
+
+                elif k in {'lang_instr'}:
+                    # 修复: 处理不等长的指令序列
+                    num_instr = np.array([len(vv) for vv in v])
+                    seqs = []
+                    for vv in v:
+                        if len(vv) > 0:
+                            seqs.extend([torch.tensor(vvv, device=device) for vvv in vv])
+                        else:
+                            # 处理空指令
+                            seqs.append(torch.tensor([self.pad], device=device))
+
+                    if not seqs:
+                        feat[k] = {'seq': []}
+                        continue
+
+                    pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+                    embed_seq = self.emb_word(pad_seq)
+
+                    fin_seq = []
+                    in_idx = 0
+                    for l in num_instr:
+                        if l > 0:
+                            fin_seq.append(embed_seq[in_idx:in_idx + l])
+                            in_idx += l
+                        else:
+                            # 处理空序列
+                            fin_seq.append(torch.tensor([], device=device))
+
+                    feat[k] = {'seq': fin_seq}
+
+                elif k in {'action_low_mask'}:
+                    seqs = [torch.tensor(vv, device=device, dtype=torch.float) for vv in v if len(vv) > 0]
+                    feat[k] = seqs
+
+                elif k in {'action_low_mask_label'}:
+                    # 修复: 处理空标签
+                    if not v or all(len(item) == 0 for item in v):
+                        feat[k] = torch.tensor([], device=device, dtype=torch.long)
+                    else:
+                        seqs = torch.tensor([vvv for vv in v for vvv in vv], device=device, dtype=torch.long)
+                        feat[k] = seqs
+
+                elif k in {'subgoal_progress', 'subgoals_completed'}:
+                    seqs = [torch.tensor(vv, device=device, dtype=torch.float) for vv in v if len(vv) > 0]
+                    if seqs:
+                        pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+                        feat[k] = pad_seq
+                    else:
+                        feat[k] = torch.tensor([], device=device)
+
+                elif k in {'action_high', 'action_high_order'}:
+                    seqs = [torch.tensor(vv, device=device, dtype=torch.long) for vv in v if len(vv) > 0]
+                    if seqs:
+                        pad_seq = pad_sequence(seqs, batch_first=True,
+                                               padding_value=self.vocab['action_high'].word2index('<<pad>>'))
+                        feat[k] = pad_seq
+                    else:
+                        feat[k] = torch.tensor([], device=device)
+
+                elif k in {'objnav'}:
+                    seqs = [torch.tensor(vv, device=device, dtype=torch.long) for vv in v if len(vv) > 0]
+                    if seqs:
+                        pad_seq = pad_sequence(seqs, batch_first=True,
+                                               padding_value=self.vocab['objnav'].word2index('<<pad>>'))
+                        embed_seq = self.emb_objnav(pad_seq)
+                        feat[k] = embed_seq
+                    else:
+                        feat[k] = torch.tensor([], device=device)
+
+                else:
+                    # 默认处理
+                    seqs = [torch.tensor(vv, device=device, dtype=torch.float if (
+                            'sub_frames' in k or 'frames' in k or 'orientation' in k) else torch.long) for vv in v
+                            if len(vv) > 0]
+                    if seqs:
+                        pad_seq = pad_sequence(seqs, batch_first=True, padding_value=self.pad)
+                        feat[k] = pad_seq
+                    else:
+                        feat[k] = torch.tensor([], device=device)
+
+            except Exception as e:
+                print(f"[ERROR] Error processing feature {k}: {e}")
+                # 设置空值以避免后续错误
+                if 'sub_frames' in k or 'frames' in k:
+                    feat[k] = torch.tensor([], device=device, dtype=torch.float)
+                else:
+                    feat[k] = torch.tensor([], device=device, dtype=torch.long)
+
+        return feat
+
+    def _add_orientation_features(self, feat_one, device):
+
+        import math
+
+        def get_orientation(d, device):
+            if d == 'left':
+                h, v = -math.pi / 2, 0.0
+            elif d == 'up':
+                h, v = 0.0, -math.pi / 12
+            elif d == 'down':
+                h, v = 0.0, math.pi / 12
+            elif d == 'right':
+                h, v = math.pi / 2, 0.0
+            else:  # 'front'
+                h, v = 0.0, 0.0
+
+            orientation = torch.cat([
+                torch.cos(torch.ones(1, device=device) * h),
+                torch.sin(torch.ones(1, device=device) * h),
+                torch.cos(torch.ones(1, device=device) * v),
+                torch.sin(torch.ones(1, device=device) * v),
+            ]).unsqueeze(-1).unsqueeze(-1).repeat(1, 7, 7)
+
+            return orientation
+
+        # 为每个视角添加方向信息
+        orientation_mapping = {
+            'frames': 'front',
+            'frames_left': 'left',
+            'frames_up': 'up',
+            'frames_down': 'down',
+            'frames_right': 'right'
+        }
+
+        for view_key, direction in orientation_mapping.items():
+            if view_key not in feat_one:
+                feat_one[view_key] = torch.empty(0, device=device)
+            view_tensor = feat_one[view_key]
+            orientation_tensor = get_orientation(direction, device).repeat(len(view_tensor), 1, 1, 1)
+            feat_one[view_key] = torch.cat([view_tensor, orientation_tensor], dim=1)
+
+        return feat_one
 
     def serialize_lang_action(self, feat, action_high_order):
         '''
