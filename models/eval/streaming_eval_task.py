@@ -259,7 +259,7 @@ class StreamingEvalTask(Eval):
         # extract language features
         # model.featurize([(traj_data, False)], action_high_order, load_mask=False)
         feat1 = cls.unwrap_to_feat(
-            model.cached_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1, action_high_order, load_mask=False))
+            model.cached_featurize(cls.wrap_to_stream(copy.deepcopy(data)), 1, action_high_order=action_high_order, load_mask=False))
 
         # previous action for teacher-forcing during expert execution (None is used for initialization)
         prev_action = None
