@@ -163,34 +163,12 @@ class ThorEnv(Controller):
                 if toggle_changes:
                     super().step(dict(action='SetObjectStates', stateChanges=toggle_changes))
 
-
-        # {
-        #   "dirty":   ["objId1", ...],
-        #   "clean":   ["objId2", ...],
-        #   "filled":  ["objId3", ...],
-        #   "empty":   ["objId4", ...],
-        #   "open":    ["objId5", ...],
-        #   "closed":  ["objId6", ...]
-        # }
         state_changes = []
         if dirty_and_empty:
-            for oid in dirty_and_empty.get("dirty", []):
-                state_changes.append({"objectId": oid, "stateChange": {"dirtyable": True, "isDirty": True}})
-            for oid in dirty_and_empty.get("clean", []):
-                state_changes.append({"objectId": oid, "stateChange": {"dirtyable": True, "isDirty": False}})
-
-            for oid in dirty_and_empty.get("filled", []):
-                state_changes.append(
-                    {"objectId": oid, "stateChange": {"canFillWithLiquid": True, "isFilledWithLiquid": True}})
-            for oid in dirty_and_empty.get("empty", []):
-                state_changes.append(
-                    {"objectId": oid, "stateChange": {"canFillWithLiquid": True, "isFilledWithLiquid": False}})
-
-            for oid in dirty_and_empty.get("open", []):
-                state_changes.append({"objectId": oid, "stateChange": {"openable": True, "isOpen": True}})
-            for oid in dirty_and_empty.get("closed", []):
-                state_changes.append({"objectId": oid, "stateChange": {"openable": True, "isOpen": False}})
-
+            state_changes.append({
+                "objectId": "all",  # or enumerate objects separately
+                "stateChange": {"dirtyable": True, "isDirty": False}
+            })
         if state_changes:
             try:
                 super().step(dict(action='SetObjectStates', stateChanges=state_changes))
