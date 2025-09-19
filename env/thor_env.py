@@ -142,7 +142,7 @@ class ThorEnv(Controller):
             super().step(dict(action="SetObjectToggles", objectToggles=object_toggles))
 
         if dirty_and_empty:
-            objs = super().last_event.metadata["objects"]
+            objs = self.last_event.metadata["objects"]
             for obj in objs:
                 oid = obj["objectId"]
                 if obj.get("dirtyable", False):

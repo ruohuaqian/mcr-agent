@@ -176,7 +176,7 @@ class StreamingEvalTask(Eval):
 
                 task = task_queue.get()
                 cls._current_task_order += 1
-            # todo save automatically or rename or update, no skip
+
             # if os.path.exists(os.path.join('logs/success', task['task'], str(task['repeat_idx']))) \
             #         or os.path.exists(os.path.join('logs/failure', task['task'], str(task['repeat_idx']))):
             #     print("skipping:", os.path.join('logs/failure', task['task'], str(task['repeat_idx'])))
@@ -711,7 +711,7 @@ class StreamingEvalTask(Eval):
         else:
             save_dir += 'failure/'
         os.makedirs(os.path.join(save_dir, task['task']), exist_ok=True)
-        os.makedirs(os.path.join(save_dir, task['task'], str(task['repeat_idx'])))
+        os.makedirs(os.path.join(save_dir, task['task'], str(task['repeat_idx'])), exist_ok=True)
 
         for f, a, k in zip(total_frames, total_actions, range(len(total_frames))):
             f.save(os.path.join(save_dir, task['task'], str(task['repeat_idx']), str(k) + '_' + a + '.png'))
