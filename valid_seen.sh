@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-
 : "${MCR_ROOT:?Please export MCR_ROOT to the root of mcr-agent}"
 
+OEM_PATH="/content/drive/MyDrive/mcr-agent/exp/OEM/latest.pth"  # 默认值
 
-OEM_PATH="/content/drive/MyDrive/mcr-agent/exp/OEM/latest.pth"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --object_model_path)
+      OEM_PATH="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
 
 
 NAV_PATH="/content/drive/MyDrive/mcr-agent/exp/MasterPolicy/latest.pth"
