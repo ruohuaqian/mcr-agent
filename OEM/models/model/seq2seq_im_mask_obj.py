@@ -288,12 +288,16 @@ class Module(Base):
             final_batch_feat = self._tensorize_and_pad(batch_feat, device)
             yield batch, final_batch_feat
 
-    def _fill_feature_one(self, data_item, device, action_high_order, load_mask=True, load_frames=True):
+    def _fill_feature_one(self, data_item, device, action_high_order=None, load_mask=True, load_frames=True):
         feat_one = dict()
 
         ex = data_item['ex']
         im = data_item['im']
         val_action_high = np.array([], dtype=np.int64)
+        if action_high_order is None:
+            action_high_order = np.array([ah['action'] for ah in ex['num']['action_high']])
+        else:
+            action_high_order = action_high_order
         try:
             # 辅助特征提取
             if not self.test_mode:
