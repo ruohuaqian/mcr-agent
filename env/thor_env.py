@@ -540,6 +540,37 @@ class ThorEnv(Controller):
         ordered_instance_ids = [id for id in instances_ids if id in pruned_instance_ids]
         return ordered_instance_ids
 
+    def resolve_object_ids_from_mask(self, interact_mask, mask_px_sample=1, exclude_inventory=True, debug=False):
+        instance_segs = np.array(self.last_event.instance_segmentation_frame)
+        color_to_object_id = self.last_event.color_to_object_id
+
+        nz_rows, nz_cols = np.nonzero(interact_mask)
+        if len(nz_rows) == 0:
+            return []
+
+        from collections import Counter, OrderedDict
+        instance_counter = Counter()
+        for i in range(0, len(nz_rows), mask_px_sample):
+            x, y = nz_rows[i], nz_cols[i]
+            instance = tuple(instance_segs[x, y])
+            instance_counter[instance] += 1
+
+        iou_scores = {}
+        mask_bool = interact_mask.astype(bool)
+        for color_id, inter_cnt in instance_counter.most_common():
+            union_cnt = np.sum(np.logical_or(np.all(instance_segs == color_id, axis=2), mask_bool))
+            iou_scores[color_id] = inter_cnt / float(max(union_cnt, 1))
+
+        iou_sorted = list(OrderedDict(sorted(iou_scores.items(), key=lambda x: x[1], reverse=True)))
+        inv_obj = self.last_event.metadata['inventoryObjects'][0]['objectId'] \
+            if exclude_inventory and len(self.last_event.metadata['inventoryObjects']) > 0 else None
+        ids = [color_to_object_id[c] for c in iou_sorted
+               if c in color_to_object_id and color_to_object_id[c] and color_to_object_id[c] != inv_obj]
+
+        # prune invalid (floor, walls, etc.)
+        ids = self.prune_by_any_interaction(ids)
+        return ids
+
     def va_interact(self, action, interact_mask=None, smooth_nav=True, mask_px_sample=1, debug=False):
         '''
         interact mask based action call
@@ -609,6 +640,14 @@ class ThorEnv(Controller):
             target_instance_id = instance_ids[0]
         else:
             target_instance_id = ""
+        NEEDS_CONTACT = {"PickupObject", "PutObject", "OpenObject", "CloseObject",
+                         "ToggleObjectOn", "ToggleObjectOff", "SliceObject",
+                         "FillObjectWithLiquid", "EmptyLiquidFromObject"}
+
+        if target_instance_id and action in NEEDS_CONTACT:
+            ok, _ = self.goto_interactable(target_instance_id, max_tries=3, smooth_nav=smooth_nav, debug=debug)
+            if not ok:
+                return False, None, target_instance_id, f"Could not reach interactable pose for {target_instance_id}", None
 
         if debug:
             print("taking action: " + str(action) + " on target_instance_id " + str(target_instance_id))
@@ -634,6 +673,58 @@ class ThorEnv(Controller):
 
         success = True
         return success, event, target_instance_id, '', api_action
+
+    def goto_interactable(self, object_id, max_tries=3, smooth_nav=True, debug=False):
+        """
+        Move the agent to a pose from which 'object_id' is interactable.
+        Returns (ok, event).
+        """
+        ev = self.step({"action": "GetInteractablePoses", "objectId": object_id})
+        ok = ev.metadata.get("lastActionSuccess", False)
+        poses = ev.metadata.get("actionReturn", []) if ok else []
+
+        if debug:
+            print(f"[goto] poses available: {len(poses)} (ok={ok})")
+
+        # Fallback: if no poses returned, try to at least get reachable positions
+        if not poses:
+            ev = self.step({"action": "GetReachablePositions"})
+            rps = ev.metadata.get("reachablePositions", [])
+            if not rps:
+                return False, ev
+            # naive fallback: try k nearest points to current position
+            cur = self.last_event.metadata["agent"]["position"]
+
+            def dist2(p):
+                dx, dz = p["x"] - cur["x"], p["z"] - cur["z"]
+                return dx * dx + dz * dz
+
+            poses = sorted(rps, key=dist2)[:max_tries]
+
+        for i, p in enumerate(poses[:max_tries]):
+
+            if "x" in p and "z" in p:
+                # Use TeleportFull to land precisely (robust); or call your nav policy
+                ev = self.step({
+                    "action": "TeleportFull",
+                    "x": p["x"], "y": p.get("y", self.last_event.metadata["agent"]["position"]["y"]),
+                    "z": p["z"],
+                    "rotation": p.get("rotation", {"x": 0, "y": 0, "z": 0}),
+                    "horizon": p.get("horizon", self.last_event.metadata["agent"]["cameraHorizon"]),
+                    "forceAction": True
+                })
+                if not ev.metadata.get("lastActionSuccess", False):
+                    if debug: print(f"[goto] TeleportFull failed on pose {i}")
+                    continue
+
+
+            ev = self.step({"action": "GetInteractablePoses", "objectId": object_id})
+            poses_here = ev.metadata.get("actionReturn", []) if ev.metadata.get("lastActionSuccess", False) else []
+            if poses_here:
+                if debug: print(f"[goto] interactable from pose {i}")
+                return True, ev
+
+        return False, ev
 
     @staticmethod
     def bbox_to_mask(bbox):
