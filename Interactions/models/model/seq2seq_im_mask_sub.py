@@ -505,42 +505,40 @@ class Module(Base):
             # 对象导航
             obj_list = [self.vocab['objnav'].word2index('<<nav>>')]
             high_idx = 0
-            if load_mask:
-
-
-                for a in ex['plan']['low_actions']:
-                    if a['api_action']['action'] in ['MoveAhead', 'LookUp', 'LookDown', 'RotateRight', 'RotateLeft']:
-                        if a['high_idx'] == (high_idx + 1):
-                            obj_list.append(self.vocab['objnav'].word2index('<<nav>>', train=False))
-                            high_idx += 1
-                        continue
-
-                    if a['api_action']['action'] == 'PutObject':
-                        label = a['api_action']['receptacleObjectId'].split('|')
-                    else:
-                        label = a['api_action']['objectId'].split('|')
-
-                    # 修复: 处理可能的索引错误
-                    try:
-                        class_name = label[4].split('_')[0] if len(label) >= 5 else label[0]
-                        indices.append(classes.index(class_name))
-                    except (IndexError, ValueError):
-                        # 如果找不到类别，使用默认值
-                        indices.append(0)  # 或者使用一个默认的类别索引
-
+            for a in ex['plan']['low_actions']:
+                if a['api_action']['action'] in ['MoveAhead', 'LookUp', 'LookDown', 'RotateRight', 'RotateLeft']:
                     if a['high_idx'] == (high_idx + 1):
-                        try:
-                            class_name = (label[4].split('_')[0] if len(label) >= 5 else label[0]).lower()
-                            obj_list.append(self.vocab['objnav'].word2index(class_name, train=False))
-                        except:
-                            # 如果找不到对象，使用导航标记
-                            obj_list.append(self.vocab['objnav'].word2index('<<nav>>', train=False))
+                        obj_list.append(self.vocab['objnav'].word2index('<<nav>>', train=False))
                         high_idx += 1
+                    continue
 
-                new_obj_list = [obj_list[o + 1] for o, obj in enumerate(obj_list) if
-                                (obj == self.vocab['objnav'].word2index('<<nav>>'))]
-                feat_one['objnav'] = new_obj_list
-                feat_one['action_low_mask_label'] = indices
+                if a['api_action']['action'] == 'PutObject':
+                    label = a['api_action']['receptacleObjectId'].split('|')
+                else:
+                    label = a['api_action']['objectId'].split('|')
+
+                # 修复: 处理可能的索引错误
+                try:
+                    class_name = label[4].split('_')[0] if len(label) >= 5 else label[0]
+                    indices.append(classes.index(class_name))
+                except (IndexError, ValueError):
+                    # 如果找不到类别，使用默认值
+                    indices.append(0)  # 或者使用一个默认的类别索引
+
+                if a['high_idx'] == (high_idx + 1):
+                    try:
+                        class_name = (label[4].split('_')[0] if len(label) >= 5 else label[0]).lower()
+                        obj_list.append(self.vocab['objnav'].word2index(class_name, train=False))
+                    except:
+                        # 如果找不到对象，使用导航标记
+                        obj_list.append(self.vocab['objnav'].word2index('<<nav>>', train=False))
+                    high_idx += 1
+
+            new_obj_list = [obj_list[o + 1] for o, obj in enumerate(obj_list) if
+                            (obj == self.vocab['objnav'].word2index('<<nav>>'))]
+            feat_one['objnav'] = new_obj_list
+            feat_one['action_low_mask_label'] = indices
+
 
             # 子目标帧处理
             if len(sub_actions) > 0:
