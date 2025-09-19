@@ -388,7 +388,7 @@ class StreamingEvalTask(Eval):
                     m_prev_action = action
 
         t += 1
-        return False, t, fails, total_actions, total_frames, err
+        return False, t, fails, total_actions, total_frames, None
 
     @classmethod
     def evaluate_streaming(cls, env, model, r_idx, resnet, data, args, lock, successes, failures, results, task):
