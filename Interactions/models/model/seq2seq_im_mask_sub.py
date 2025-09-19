@@ -501,12 +501,12 @@ class Module(Base):
                     feat_one['subgoal_progress'] = subgoal_progress
                 else:
                     feat_one['subgoal_progress'] = []
-
+            indices = []
             # 对象导航
             obj_list = [self.vocab['objnav'].word2index('<<nav>>')]
             high_idx = 0
             if load_mask:
-                indices = []
+
 
                 for a in ex['plan']['low_actions']:
                     if a['api_action']['action'] in ['MoveAhead', 'LookUp', 'LookDown', 'RotateRight', 'RotateLeft']:

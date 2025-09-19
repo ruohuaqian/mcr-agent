@@ -192,12 +192,11 @@ class Module(Base):
                     subgoal_progress = [(i+1)/float(num_actions) for i in range(num_actions)]
                     feat['subgoal_progress'].append(subgoal_progress)
 
-
-
+            indices = []
             if not self.test_mode:
                 obj_list = [self.vocab['objnav'].word2index('<<nav>>')]
                 high_idx=0
-                indices = []
+
                 
                 for a in ex['plan']['low_actions']:
                     if a['api_action']['action'] in ['MoveAhead', 'LookUp', 'LookDown', 'RotateRight', 'RotateLeft']:
